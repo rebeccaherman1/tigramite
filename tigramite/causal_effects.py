@@ -1823,6 +1823,7 @@ class CausalEffects():
         adjustment_set='optimal',
         conditional_estimator=None,  
         data_transform=None,
+        X_transform=None,
         mask_type=None,
         ignore_identifiability=False,
         ):
@@ -1849,6 +1850,13 @@ class CausalEffects():
             Used to transform data prior to fitting. For example,
             sklearn.preprocessing.StandardScaler for simple standardization. The
             fitted parameters are stored.
+        X_transform: sklearn decomposition (or preprocessing) object, optional (default: None)
+            Used to transform only the X data prior to application of data_transform
+            and fitting. For example, sklearn.decomposition.PCA for a PCA decomposition
+            that can help reduce multi-colinearity. Applying this transformation only to X is
+            necessary to ensure successful conditioning on Z. Stored observation_array and 
+            fitted parameters are for the transformed data, so a reverse transform is needed to
+            picture spatial regression coefficients.
         mask_type : {None, 'y','x','z','xy','xz','yz','xyz'}
             Masking mode: Indicators for which variables in the dependence
             measure I(X; Y | Z) the samples should be masked. If None, the mask
@@ -1898,6 +1906,7 @@ class CausalEffects():
                         model=estimator,
                         conditional_model=conditional_estimator,
                         data_transform=data_transform,
+                        X_transform=X_transform,
                         mask_type=mask_type,
                         verbosity=self.verbosity)      
 

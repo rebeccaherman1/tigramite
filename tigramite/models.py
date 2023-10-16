@@ -41,6 +41,13 @@ class Models():
         sklearn.preprocessing.StandardScaler for simple standardization. The
         fitted parameters are stored. Note that the inverse_transform is then
         applied to the predicted data.
+    X_transform: sklearn decomposition (or preprocessing) object, optional (default: None)
+        Used to transform only the X data prior to application of data_transform
+        and fitting. For example, sklearn.decomposition.PCA for a PCA decomposition
+        that can help reduce multi-colinearity. Applying this transformation only to X is
+        necessary to ensure successful conditioning on Z. Stored observation_array and 
+        fitted parameters are for the transformed data, so a reverse transform is needed to
+        picture spatial regression coefficients.
     mask_type : {None, 'y','x','z','xy','xz','yz','xyz'}
         Masking mode: Indicators for which variables in the dependence
         measure I(X; Y | Z) the samples should be masked. If None, the mask
@@ -54,6 +61,7 @@ class Models():
                  model,
                  conditional_model=None,
                  data_transform=None,
+                 X_transform=None,
                  mask_type=None,
                  verbosity=0):
         # Set the mask type and dataframe object
@@ -70,6 +78,7 @@ class Models():
             self.conditional_model = conditional_model
         # Set the data_transform object and verbosity
         self.data_transform = data_transform
+        self.X_transform = X_transform
         self.verbosity = verbosity
         # Initialize the object that will be set later
         self.all_parents = None
@@ -168,6 +177,14 @@ class Models():
 
         # Transform the data if needed
         self.fitted_data_transform = None
+        if self.X_transform is not None:
+            X0_transform = deepcopy(self.X_transform)
+            #TODO! make single source of truth for this logic. 
+            X_indices = list(np.where(xyz==0)[0])
+            X0T = array[x_indices, :].T
+            X0_transform.fit(X0T)
+            self.fitted_X_transform = X0_transform
+            array[x_indices, :] = X0_transform.transform(X=X0T).T
         if self.data_transform is not None:
             # Fit only X, Y, and S for later use in transforming input
             X_transform = deepcopy(self.data_transform)
@@ -219,6 +236,7 @@ class Models():
         fit_results['model'] = a_model
         # Cache the data transform
         fit_results['fitted_data_transform'] = self.fitted_data_transform
+        fit_results['fitted_X_transform'] = self.fitted_X_transform
 
         # Cache and return the fit results
         self.fit_results = fit_results
@@ -247,7 +265,8 @@ class Models():
             Optional parameters passed on to sklearn prediction function (model and
             conditional_model).
         transform_interventions_and_prediction : bool (default: False)
-            Whether to perform the inverse data_transform on prediction results.
+            Whether to perform the X_transform and data_transoform on the intervention data
+            and the inverse data_transform on prediction results.
         return_further_pred_results : bool, optional (default: False)
             In case the predictor class returns more than just the expected value,
             the entire results can be returned.
@@ -286,6 +305,9 @@ class Models():
             raise ValueError("Model not yet fitted.")
 
         # Transform the data if needed
+        fitted_X_transform = self.fit_results['fitted_X_transform']
+        if transform_interventions_and_prediction and fitted_X_transform is not None:
+            intervention_data = fitted_X_transform.transform(X=intervention_data)
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
             intervention_data = fitted_data_transform['X'].transform(X=intervention_data)
