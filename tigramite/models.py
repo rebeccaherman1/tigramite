@@ -185,7 +185,7 @@ class Models():
             X0T = array[X_indices, :].T
             X0_transform.fit(X0T)
             self.fitted_X_transform = X0_transform
-            array[x_indices, :] = X0_transform.transform(X=X0T).T
+            array[X_indices, :] = X0_transform.transform(X=X0T).T
         if self.data_transform is not None:
             # Fit only X, Y, and S for later use in transforming input
             X_transform = deepcopy(self.data_transform)
