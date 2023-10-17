@@ -178,14 +178,6 @@ class Models():
         # Transform the data if needed
         self.fitted_data_transform = None
         self.fitted_X_transform = None
-        if self.X_transform is not None:
-            X0_transform = deepcopy(self.X_transform)
-            #TODO! make single source of truth for this logic. 
-            X_indices = list(np.where(xyz==0)[0])
-            X0T = array[X_indices, :].T
-            X0_transform.fit(X0T)
-            self.fitted_X_transform = X0_transform
-            array[X_indices, :] = X0_transform.transform(X=X0T).T
         if self.data_transform is not None:
             # Fit only X, Y, and S for later use in transforming input
             X_transform = deepcopy(self.data_transform)
@@ -205,6 +197,16 @@ class Models():
             # Now transform whole array
             all_transform = deepcopy(self.data_transform)
             array = all_transform.fit_transform(X=array.T).T
+        
+        #additional transform on X data if needed
+        if self.X_transform is not None:
+            X0_transform = deepcopy(self.X_transform)
+            #TODO! make single source of truth for this logic. 
+            x_indices = list(np.where(xyz==0)[0])
+            X0T = array[x_indices, :].T
+            X0_transform.fit(X0T)
+            self.fitted_X_transform = X0_transform
+            array[x_indices, :] = X0_transform.transform(X=X0T).T
 
         # Fit the model 
         # Copy and fit the model
