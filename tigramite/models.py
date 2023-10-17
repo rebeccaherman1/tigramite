@@ -308,14 +308,14 @@ class Models():
             raise ValueError("Model not yet fitted.")
 
         # Transform the data if needed
-        fitted_X_transform = self.fit_results['fitted_X_transform']
-        if transform_interventions_and_prediction and fitted_X_transform is not None:
-            intervention_data = fitted_X_transform.transform(X=intervention_data)
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
             intervention_data = fitted_data_transform['X'].transform(X=intervention_data)
             if self.conditions is not None and conditions_data is not None:
                 conditions_data = fitted_data_transform['S'].transform(X=conditions_data)
+        fitted_X_transform = self.fit_results['fitted_X_transform']
+        if transform_interventions_and_prediction and fitted_X_transform is not None:
+            intervention_data = fitted_X_transform.transform(X=intervention_data)
 
         # Extract observational Z from stored array
         z_indices = list(np.where(self.fit_results['xyz']==3)[0])
