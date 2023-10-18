@@ -324,7 +324,9 @@ class Models():
         # Extract observational Z from stored array
         z_indices = list(np.where(self.fit_results['xyz']==3)[0])
         z_array = self.fit_results['observation_array'][z_indices, :].T  
-        Tobs = len(self.fit_results['observation_array'].T) 
+        Tobs = len(self.fit_results['observation_array'].T)
+        #get length of transformed X data
+        lenTX = len(np.where(self.fit_results['xyz']==0)[0])
 
         if self.conditions is not None and conditions_data is not None:
             s_indices = list(np.where(self.fit_results['xyz']==2)[0])
@@ -335,7 +337,7 @@ class Models():
         # Now iterate through interventions (and potentially S)
         for index, dox_vals in enumerate(intervention_data):
             # Construct XZS-array
-            intervention_array = dox_vals.reshape(1, self.lenX) * np.ones((Tobs, self.lenX))
+            intervention_array = dox_vals.reshape(1, lenTX) * np.ones((Tobs, lenTX))
             if self.conditions is not None and conditions_data is not None:
                 conditions_array = conditions_data[index].reshape(1, self.lenS) * np.ones((Tobs, self.lenS))  
                 predictor_array = np.hstack((intervention_array, z_array, conditions_array))
