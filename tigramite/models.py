@@ -178,10 +178,11 @@ class Models():
         # Transform the data if needed
         self.fitted_data_transform = None
         self.fitted_X_transform = None
+        #TODO! make single source of truth for this logic. 
+        x_indices = list(np.where(xyz==0)[0])
         if self.data_transform is not None:
             # Fit only X, Y, and S for later use in transforming input
             X_transform = deepcopy(self.data_transform)
-            x_indices = list(np.where(xyz==0)[0])
             X_transform.fit(array[x_indices, :].T)
             self.fitted_data_transform = {'X': X_transform}
             Y_transform = deepcopy(self.data_transform)
@@ -201,12 +202,15 @@ class Models():
         #additional transform on X data if needed
         if self.X_transform is not None:
             X0_transform = deepcopy(self.X_transform)
-            #TODO! make single source of truth for this logic. 
-            x_indices = list(np.where(xyz==0)[0])
             X0T = array[x_indices, :].T
             X0_transform.fit(X0T)
             self.fitted_X_transform = X0_transform
-            array[x_indices, :] = X0_transform.transform(X=X0T).T
+            #if this transform changes the size of X (decomposition dimension reduction), 
+            #then we need to do this differently, and also to update XYZ.
+            newX = X0_transform.transform(X=X0T).T
+            other_indices = list(np.where(xyz!=0)[0])
+            array = np.concatenate((newX, array[other_indices, :]))
+            xyz   = np.concatenate((np.zeros((newX.shape[0],), dtype=int), xyz[other_indices]))
 
         # Fit the model 
         # Copy and fit the model
