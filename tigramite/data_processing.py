@@ -57,6 +57,10 @@ class DataFrame():
         construct_array(), the individual components are parsed from vector_vars
         and added (accounting for lags) to the list that creates X, Y and Z for
         conditional independence test.
+    vector_lengths : array
+        Alternative to vector_vars -- will overwrite vector_vars if both are passed in
+        Array of lengths of vectors for automatic creation of vector_vars, assuming 
+        vectors do not overlap, appear in order in the dataframe, and use only lag=0
     var_names : list of strings, optional (default: range(N))
         Names of variables, must match the number of variables. If None is
         passed, variables are enumerated as [0, 1, ...]
@@ -154,7 +158,7 @@ class DataFrame():
         boot_samples, and boot_blocklength.
     """
 
-    def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, var_names=None,
+    def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, vector_lengths=None, var_names=None,
         data_type=None, datatime=None, analysis_mode ='single', reference_points=None,
         time_offsets=None, remove_missing_upto_maxlag=False):
 
@@ -290,6 +294,20 @@ class DataFrame():
             self.Ndata = _dataset_data_shape[1] # (Number of variables) 
             # N does not vary across the datasets
 
+        #automatic creation of vector_vars from vector_lengths
+        if vector_lengths is not None:
+            if not isinstance(vector_lengths, np.ndarray):
+                raise TypeError("vector_lengths must be an np.array, not type {}".format(type(vector_lengths)))
+            _vl_d = len(vector_lengths.shape)
+            if _vl_d>1:
+                raise TypeError("vector_lengths must be a 1d array, not a {}-d array".format(_vl_d))
+            svl = np.sum(vector_lengths)
+            micro_N = _data_shape[-1]
+            if svl != micro_N:
+                raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, micro_N))
+            #TODO: write tests to fully test this new functionality
+            vector_vars = {i: [(x+np.sum(vector_lengths[:i]),0) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
+        
         # Setup dictionary of variables for vector mode
         self.vector_vars = vector_vars
         if self.vector_vars is None:
@@ -300,7 +318,7 @@ class DataFrame():
             self.has_vector_data = True
 
 
-        # TODO: check vector_vars!
+        # TODO: check vector_vars! throw warning if vector_vars overlap or don't cover the full space of the dataset.
         self.N = len(self.vector_vars)
 
         # Warnings
@@ -318,6 +336,9 @@ class DataFrame():
         if var_names is None:
             self.var_names = {i: i for i in range(self.N)}
         else:
+            _len_var_names = len(var_names)
+            if(_len_var_names != self.N):
+                raise ValueError("{} var_names provided, but data has {} variables".format(_len_var_names, self.N))
             self.var_names = var_names
 
         self.mask = None
@@ -673,6 +694,7 @@ class DataFrame():
         # If vector-valued variables exist, add them
         def vectorize(varlag):     
             vectorized_var = []
+            macro_vars = []
             for (var, lag) in varlag:
                 for (vector_var, vector_lag) in self.vector_vars[var]:
                     vectorized_var.append((vector_var, vector_lag + lag))
