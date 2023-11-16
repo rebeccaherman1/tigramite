@@ -590,6 +590,7 @@ class DataFrame():
                         mask=None,
                         mask_type=None,
                         data_type=None,
+                        return_macro_nodes=False,
                         return_cleaned_xyz=False,
                         do_checks=True,
                         remove_overlaps=True,
@@ -622,6 +623,10 @@ class DataFrame():
             individual samples in a variable (or all samples) are continuous 
             or discrete: 0s for continuous variables and 1s for discrete variables.
             If it is set, then it overrides the self.data_type assigned to the dataframe.
+        return_macro_nodes : bool, optional (default: False, recommend True with vectorized dataframes)
+            Whether to return MACRO_NODES, which identifies which macro (var, lag) each 
+            element in the ARRAY came from with a unique int, and NODE_DICT, which translates
+            the int into the macro (var, lag) pair and gives the length of the vector.
         return_cleaned_xyz : bool, optional (default: False)
             Whether to return cleaned X,Y,Z, where possible duplicates are
             removed.
@@ -688,13 +693,17 @@ class DataFrame():
 
         Returns
         -------
-        array, xyz [,XYZ], data_type : Tuple of data array of shape (dim, n_samples),
-            xyz identifier array of shape (dim,) identifying which row in array
-            corresponds to X, Y, and Z, and the type mask that indicates which samples
-            are continuous or discrete. For example: X = [(0, -1)],
-            Y = [(1, 0)], Z = [(1, -1), (0, -2)] yields an array of shape
-            (4, n_samples) and xyz is xyz = numpy.array([0,1,2,2]). If
-            return_cleaned_xyz is True, also outputs the cleaned XYZ lists.
+        array, xyz [,XYZ] [,macro_nodes, node_dict], data_type : Tuple of data 
+            array of shape (dim, n_samples), xyz identifier array of shape (dim,) 
+            identifying which row in array corresponds to X, Y, and Z, and the 
+            type mask that indicates which samples are continuous or discrete. 
+            For example: X = [(0, -1)], Y = [(1, 0)], Z = [(1, -1), (0, -2)] 
+            yields an array of shape (4, n_samples) and xyz is 
+            xyz = numpy.array([0,1,2,2]). If return_cleaned_xyz is True, also 
+            outputs the cleaned XYZ lists. If return_macro_nodes is True, also
+            outputs the macro_nodes array and node_dict, which together provide
+            the macro-information that would otherwise be lost during the creation
+            of the array from a vectorized dataset.
         """
 
         # # This version does not yet work with bootstrap
@@ -709,18 +718,18 @@ class DataFrame():
         
         if Z is None:
             Z = []
-
-        all_nodes = X+Y+Z+extraZ
+        
         #assume no overlap here -- should be checked before arguments are passed in.
-        node_dict = {i: all_nodes[i] for i in range(len(all_nodes))}
-        swapped_node_dict = {node_dict[k]: k for k in node_dict.keys()}
+        all_nodes = X+Y+Z+extraZ
+        #dictionary that maps ints which will appear in MACRO_NODES array to a tuple of macro (var, lag) pairs and the length of the vector
+        node_dict = {i: (all_nodes[i], self.vector_lengths[all_nodes[i][0]]) for i in range(len(all_nodes))}
+        #array like xyz which shows which macro (var, lag) pair the microvariables in OBSERVATION_ARRAY come from.
+        macro_nodes = np.array([k for k in node_dict.keys() for i in range(node_dict[k][1])])
             
         # If vector-valued variables exist, add them
         def vectorize(varlag):     
             vectorized_var = []
-            macro_vars = []
             for (var, lag) in varlag:
-                node_index = swapped_node_dict[(var, lag)]
                 for (vector_var, vector_lag) in self.vector_vars[var]:
                     vectorized_var.append((vector_var, vector_lag + lag))
             return vectorized_var
@@ -736,6 +745,7 @@ class DataFrame():
         Z = list(OrderedDict.fromkeys(Z))
         extraZ = list(OrderedDict.fromkeys(extraZ))
 
+        #TODO this should happen outside, in the model class.
         if remove_overlaps:
             # If a node in Z occurs already in X or Y, remove it from Z
             Z = [node for node in Z if (node not in X) and (node not in Y)]
@@ -743,6 +753,10 @@ class DataFrame():
 
         XYZ = X + Y + Z + extraZ
         dim = len(XYZ)
+        #MACRO_NODES SHOULD correspond to XYZ if no duplicates were found and removed.
+        if dim != len(macro_nodes):
+            raise ValueError("overlaps removed; must find some way to update MACRO_NODES")
+            #TODO implement this...
 
         # Check that all lags are non-positive and indices are in [0,N-1]
         if do_checks:
@@ -778,6 +792,8 @@ class DataFrame():
                 "'max_lag_or_tau_max', '2xtau_max_future'}")
 
         # Setup XYZ identifier
+        #TODO this should actually be defined in initialization of the dataframe so it can be accessed
+        #using single-source-of-truth later!
         index_code = {'x' : 0,
                       'y' : 1,
                       'z' : 2,
@@ -946,7 +962,13 @@ class DataFrame():
         if verbosity > 2:
             self.print_array_info(array, X, Y, Z, self.missing_flag, mask_type, type_array, extraZ)
 
-        # Return the array and xyz and optionally (X, Y, Z)
+        # Return the array and xyz and optionally (X, Y, Z) and/or macro node information
+        if return_macro_nodes and return_cleaned_xyz:
+            return array, xyz, (X, Y, Z), macro_nodes, node_array, type_array
+        
+        if return_macro_nodes:
+            return array, xyz, macro_nodes, node_array, type_array
+        
         if return_cleaned_xyz:
             return array, xyz, (X, Y, Z), type_array
 
