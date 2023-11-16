@@ -120,18 +120,25 @@ class Models():
 
         def get_vectorized_length(W):
             return sum([len(self.dataframe.vector_vars[w[0]]) for w in W])
-
+        
         self.X = X 
         self.Y = Y
 
         if conditions is None:
             conditions = []
         self.conditions = conditions
-
+        
+        #remove macro-duplicates here
+        #remove nodes from Z if they are also in conditions or X
         if Z is not None:
-            Z = [z for z in Z if z not in conditions]
+            Z = [z for z in Z if z not in conditions+self.X]
+            nnZ = Z
+        else:
+            nnZ = []
 
         self.Z = Z
+        #remove nodes from Y if they are also in X or Z (should not appear in conditions) 
+        self.Y = [y in self.Y if y not in self.X+nnZ]
 
         # lenX = len(self.X)
         # lenS = len(self.conditions)

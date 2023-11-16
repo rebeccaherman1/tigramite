@@ -752,6 +752,7 @@ class DataFrame():
         #TODO this should happen outside, in the model class.
         if remove_overlaps:
             # If a node in Z occurs already in X or Y, remove it from Z
+            #TODO: if we ask to condition on a node, shouldn't we actually remove it from Y?
             Z = [node for node in Z if (node not in X) and (node not in Y)]
             extraZ = [node for node in extraZ if (node not in X) and (node not in Y) and (node not in Z)]
 
