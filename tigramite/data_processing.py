@@ -127,6 +127,22 @@ class DataFrame():
             Is var_names
         If var_names is None:
             Is {i: i for i in range(self.N)}
+    #TODO jakob -- check this and the next? Why was this not included to begin with?
+    self.vector_vars:
+        If vector_lengths is not None:
+            created internally so all elements of each vector are at lag 0, 
+            and vectors cover all data without overlapping
+        Else if vector_vars is not None:
+            Is vector_vars
+        Else:
+            Is {i: (i, 0) for i in range(self.N)}
+    self.vector_lengths:
+        If vector_lengths is not None:
+            Is vector_lengths
+        Else if vector_vars is not None:
+            contains the length of each vector
+        Else:
+            an array of 1s for non-vectorized data
     self.datatime : dictionary
         Time axis for each of the multiple datasets.
     self.analysis_mode : string
@@ -317,7 +333,10 @@ class DataFrame():
         else:
             self.has_vector_data = True
 
-
+        self.vector_lengths = vector_lengths
+        if self.vector_lengths is None:
+            self.vector_lengths = np.array([len(self.vector_vars[k]) for k in self.vector_vars.keys()])
+        
         # TODO: check vector_vars! throw warning if vector_vars overlap or don't cover the full space of the dataset.
         self.N = len(self.vector_vars)
 
@@ -691,11 +710,17 @@ class DataFrame():
         if Z is None:
             Z = []
 
+        all_nodes = X+Y+Z+extraZ
+        #assume no overlap here -- should be checked before arguments are passed in.
+        node_dict = {i: all_nodes[i] for i in range(len(all_nodes))}
+        swapped_node_dict = {node_dict[k]: k for k in node_dict.keys()}
+            
         # If vector-valued variables exist, add them
         def vectorize(varlag):     
             vectorized_var = []
             macro_vars = []
             for (var, lag) in varlag:
+                node_index = swapped_node_dict[(var, lag)]
                 for (vector_var, vector_lag) in self.vector_vars[var]:
                     vectorized_var.append((vector_var, vector_lag + lag))
             return vectorized_var
