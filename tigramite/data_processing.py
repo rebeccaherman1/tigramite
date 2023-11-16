@@ -143,6 +143,8 @@ class DataFrame():
             contains the length of each vector
         Else:
             an array of 1s for non-vectorized data
+    self.vectorized:
+        True if vector_vars or vector_lengths is not None, else False
     self.datatime : dictionary
         Time axis for each of the multiple datasets.
     self.analysis_mode : string
@@ -310,6 +312,8 @@ class DataFrame():
             self.Ndata = _dataset_data_shape[1] # (Number of variables) 
             # N does not vary across the datasets
 
+        self.vectorized = (vector_lengths is not None) or (vector_vars is not None)    
+        
         #automatic creation of vector_vars from vector_lengths
         if vector_lengths is not None:
             if not isinstance(vector_lengths, np.ndarray):
@@ -339,7 +343,7 @@ class DataFrame():
         
         # TODO: check vector_vars! throw warning if vector_vars overlap or don't cover the full space of the dataset.
         self.N = len(self.vector_vars)
-
+        
         # Warnings
         if self.analysis_mode == 'single' and self.N > next(iter(self.T.values())):
             warnings.warn("In analysis mode 'single', 'data'.shape = ({}, {});"\
