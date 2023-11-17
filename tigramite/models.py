@@ -40,7 +40,11 @@ class Models():
         Used to transform data prior to fitting. For example,
         sklearn.preprocessing.StandardScaler for simple standardization. The
         fitted parameters are stored. Note that the inverse_transform is then
-        applied to the predicted data.
+        applied to the predicted data
+    transform_macro : boolean, optional (default: dataframe.vectorized)
+        Determines whether the data_transform should be applied to the data matrix
+        as a whole, or should be applied to macro-nodes individually. Recommended
+        for vectorized dataframes; defaults to whether the dataframe is vectorized.
     mask_type : {None, 'y','x','z','xy','xz','yz','xyz'}
         Masking mode: Indicators for which variables in the dependence
         measure I(X; Y | Z) the samples should be masked. If None, the mask
@@ -54,8 +58,13 @@ class Models():
                  model,
                  conditional_model=None,
                  data_transform=None,
+                 transform_macro=None,
                  mask_type=None,
                  verbosity=0):
+        if transform_macro is None:
+            self.transform_macro = dataframe.vectorized
+        else:
+            self.transform_macro = transform_macro
         # Set the mask type and dataframe object
         self.mask_type = mask_type
         self.dataframe = dataframe
@@ -70,6 +79,7 @@ class Models():
             self.conditional_model = conditional_model
         # Set the data_transform object and verbosity
         self.data_transform = data_transform
+        self.transform_macro = transform_macro
         self.verbosity = verbosity
         # Initialize the object that will be set later
         self.all_parents = None
@@ -138,7 +148,7 @@ class Models():
 
         self.Z = Z
         #remove nodes from Y if they are also in X or Z (should not appear in conditions) 
-        self.Y = [y in self.Y if y not in self.X+nnZ]
+        self.Y = [y for y in self.Y if y not in self.X+nnZ]
 
         # lenX = len(self.X)
         # lenS = len(self.conditions)
@@ -163,7 +173,7 @@ class Models():
                                  "" % (self.tau_max, max_lag))
 
         # Construct array of shape (var, time)
-        array, xyz, _ = \
+        array, xyz, macro_nodes, node_dict, _ = \
             self.dataframe.construct_array(X=self.X, Y=self.Y,  
                                            Z=self.conditions,
                                            extraZ=self.Z,
@@ -171,7 +181,8 @@ class Models():
                                            mask_type=self.mask_type,
                                            cut_off=self.cut_off,
                                            remove_overlaps=True,
-                                           verbosity=self.verbosity)
+                                           verbosity=self.verbosity,
+                                           return_macro_nodes=True)
 
         # Transform the data if needed
         self.fitted_data_transform = None
