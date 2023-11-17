@@ -174,6 +174,8 @@ class DataFrame():
     self.bootstrap : dictionary
         Whether to use bootstrap. Must be a dictionary with keys random_state,
         boot_samples, and boot_blocklength.
+    self.index_code : dictionary
+        Codes used during construct_array for single source of truth later
     """
 
     def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, vector_lengths=None, var_names=None,
@@ -404,7 +406,14 @@ class DataFrame():
         # If PCMCI.run_bootstrap_of is called, then the
         # bootstrap random draw can be set here
         self.bootstrap = None
+        
+        self.index_code = {'x' : 0,
+                           'y' : 1,
+                           'z' : 2,
+                           'e' : 3}
 
+    def get_index_code(n):
+        return self.index_code[n]
 
     def _check_mask(self, mask, check_data_type=False):
         """Checks that the mask is:
@@ -749,10 +758,10 @@ class DataFrame():
         Z = list(OrderedDict.fromkeys(Z))
         extraZ = list(OrderedDict.fromkeys(extraZ))
 
-        #TODO this should happen outside, in the model class.
         if remove_overlaps:
             # If a node in Z occurs already in X or Y, remove it from Z
             #TODO: if we ask to condition on a node, shouldn't we actually remove it from Y?
+            #Couldn't there theoretically also be overlaps between X and Y?
             Z = [node for node in Z if (node not in X) and (node not in Y)]
             extraZ = [node for node in extraZ if (node not in X) and (node not in Y) and (node not in Z)]
 
@@ -796,14 +805,8 @@ class DataFrame():
             raise ValueError("max_lag must be in {'2xtau_max', 'tau_max', 'max_lag', "\
                 "'max_lag_or_tau_max', '2xtau_max_future'}")
 
-        # Setup XYZ identifier
-        #TODO this should actually be defined in initialization of the dataframe so it can be accessed
-        #using single-source-of-truth later!
-        index_code = {'x' : 0,
-                      'y' : 1,
-                      'z' : 2,
-                      'e' : 3}
-        xyz = np.array([index_code[name]
+        #TODO make this an accessible function
+        xyz = np.array([self.get_index_code(name)
                         for var, name in zip([X, Y, Z, extraZ], ['x', 'y', 'z', 'e'])
                         for _ in var])
 
@@ -928,7 +931,7 @@ class DataFrame():
 
                 # Iterate over defined mapping from letter index to number index,
                 # i.e. 'x' -> 0, 'y' -> 1, 'z'-> 2, 'e'-> 3
-                for idx, cde in index_code.items():
+                for idx, cde in self.index_code.items():
                     # Check if the letter index is in the mask type
                     if (mask_type is not None) and (idx in mask_type):
                         # If so, check if any of the data that correspond to the
@@ -1126,7 +1129,7 @@ def get_block_length(array, xyz, mode):
     # Initiailize the indices
     indices = range(dim)
     if mode == 'significance':
-        indices = np.where(xyz == 0)[0]
+        indices = np.where(xyz == self.get_index_code('x'))[0]
 
     # Maximum lag for autocov estimation
     max_lag = int(0.1*T)

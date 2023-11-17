@@ -184,24 +184,30 @@ class Models():
                                            verbosity=self.verbosity,
                                            return_macro_nodes=True)
 
+        #assumes that xyz will not be re-defined; is local. TODO maybe want non-local version
+        def get_indices(n):
+            return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
+        
         # Transform the data if needed
         self.fitted_data_transform = None
         if self.data_transform is not None:
             # Fit only X, Y, and S for later use in transforming input
             X_transform = deepcopy(self.data_transform)
-            x_indices = list(np.where(xyz==0)[0])
+            x_indices = get_indices('x')
             X_transform.fit(array[x_indices, :].T)
             self.fitted_data_transform = {'X': X_transform}
             Y_transform = deepcopy(self.data_transform)
-            y_indices = list(np.where(xyz==1)[0])
+            y_indices = get_indices('y')
             Y_transform.fit(array[y_indices, :].T)
             self.fitted_data_transform['Y'] = Y_transform
+            #TODO why do we need a separate transform for S=Z=conditions and not for extra_Z?
             if len(self.conditions) > 0:
                 S_transform = deepcopy(self.data_transform)
-                s_indices = list(np.where(xyz==2)[0])
+                s_indices = get_indices('z')
                 S_transform.fit(array[s_indices, :].T) 
                 self.fitted_data_transform['S'] = S_transform
 
+            #TODO not all transformations are the same! PCA?
             # Now transform whole array
             all_transform = deepcopy(self.data_transform)
             array = all_transform.fit_transform(X=array.T).T
@@ -210,11 +216,11 @@ class Models():
         # Copy and fit the model
         a_model = deepcopy(self.model)
 
-        predictor_indices =  list(np.where(xyz==0)[0]) \
-                           + list(np.where(xyz==3)[0]) \
-                           + list(np.where(xyz==2)[0])
+        predictor_indices =  get_indices('x') \
+                           + get_indices('e') \
+                           + get_indices('z')
         predictor_array = array[predictor_indices, :].T
-        target_array = array[np.where(xyz==1)[0], :].T
+        target_array = array[np.array(get_indices('y')), :].T
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
