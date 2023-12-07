@@ -192,15 +192,37 @@ class Models():
                                            verbosity=self.verbosity,
                                            return_macro_nodes=True)
 
-        #assumes the array XYZ returned above will not be changed. Is thus local in a way.
+        #the following functions assume the arrays returned above (xyz, macro_nodes, array)
+        #will not be changed. 
+        
+        #finds rows in `array` that correspond to X, Y, Z, or extraZ.
         def get_indices(n):
             return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
         
-        def fit_transform(n):
-            loc_indices = get_indices(n)
+        #finds rows in `array` that correspond to the ith macro (var, lag). 
+        def get_macro_node(i):
+            return list(np.where(macro_nodes==i))
+        
+        #fits transform and returns transformed `array`, where loc_indices can select
+        #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
+        def fit_transform(loc_indices=None):
+            if loc_indices is not None:
+                loc_array = array[loc_indices, :]
+            else:
+                loc_array = array
             loc_transform = deepcopy(self.data_transform)
-            loc_transform.fit(array[loc_indices, :].T)
-            return loc_transform
+            X_tr = loc_transform.fit_transform(loc_array.T).T
+            return (loc_transform, X_tr)
+        
+        #transforms data divided by XYZ. Returns only the fitted transform.
+        def fit_xyz_transform(n):
+            loc_indices = get_indices(n)
+            return fit_transform(loc_indices)[0]
+        
+        #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
+        def fit_macro_transform(i):
+            loc_indices = get_macro_nodes(i)
+            return fit_transform(loc_indices)
             
         transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
             
@@ -218,10 +240,9 @@ class Models():
                 else:
                     sep_transforms = transform_names.keys()
                 for w in sep_transforms:
-                    self.fitted_data_transform[transform_names[w]] = fit_transform(w)
+                    self.fitted_data_transform[transform_names[w]] = fit_xyz_transform(w)
                 # Now transform whole array
-                all_transform = deepcopy(self.data_transform)
-                array = all_transform.fit_transform(X=array.T).T
+                array = fit_transform()[1]
             
             else:
                 
