@@ -355,13 +355,27 @@ class Models():
         """
 
         intervention_T, _ = intervention_data.shape
+        
+        def _calc_transformed_length(n):
+            return sum(self.fit_results['xyz']==self.dataframe.get_index_code(n))
+        def _check_error(a, b, a_name, b_name, dataframe_type):
+            if a != b:
+                raise ValueError(
+                    "{} ({}) must equal the vectorized length of {} in the {} dataframe ({}).".format(
+                        a_name, a, b_name, dataframe_type, b)
+                )
 
-        if intervention_data.shape[1] != self.lenX:
-            raise ValueError("intervention_data.shape[1] must be len(X).")
-
+        if transform_interventions_and_prediction:
+            _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
+        else:
+            _check_error(intervention_data.shape[1], _calc_transformed_length('x'), 
+                         "intervention_data.shape[1]", 'X', 'transformed')
         if conditions_data is not None:
-            if conditions_data.shape[1] != len(self.conditions):
-                raise ValueError("conditions_data.shape[1] must be len(S).")
+            if transform_interventions_and_prediction:
+                _check_error(conditions_data.shape[1], self.lenS, "conditions_data.shape[1]", 'S', "original")
+            else:
+                _check_error(conditions_data.shape[1], _calc_transformed_length('z'),
+                             "conditions_data.shape[1]", 'S', 'transformed')
             if conditions_data.shape[0] != intervention_data.shape[0]:
                 raise ValueError("conditions_data.shape[0] must match intervention_data.shape[0].")
 
