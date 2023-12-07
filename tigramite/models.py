@@ -196,16 +196,16 @@ class Models():
         #will not be changed. 
         
         #finds rows in `array` that correspond to X, Y, Z, or extraZ.
-        def get_indices(n):
+        def _get_indices(n):
             return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
         
         #finds rows in `array` that correspond to the ith macro (var, lag). 
-        def get_macro_node(i):
+        def _get_macro_node(i):
             return list(np.where(macro_nodes==i))
         
         #fits transform and returns transformed `array`, where loc_indices can select
         #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
-        def fit_transform(loc_indices=None):
+        def _fit_transform(loc_indices=None):
             if loc_indices is not None:
                 loc_array = array[loc_indices, :]
             else:
@@ -215,14 +215,14 @@ class Models():
             return (loc_transform, X_tr)
         
         #transforms data divided by XYZ. Returns only the fitted transform.
-        def fit_xyz_transform(n):
-            loc_indices = get_indices(n)
-            return fit_transform(loc_indices)[0]
+        def _fit_xyz_transform(n):
+            loc_indices = _get_indices(n)
+            return _fit_transform(loc_indices)[0]
         
         #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
-        def fit_macro_transform(i):
-            loc_indices = get_macro_nodes(i)
-            return fit_transform(loc_indices)
+        def _fit_macro_transform(i):
+            loc_indices = _get_macro_nodes(i)
+            return _fit_transform(loc_indices)
             
         transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
             
@@ -240,11 +240,13 @@ class Models():
                 else:
                     sep_transforms = transform_names.keys()
                 for w in sep_transforms:
-                    self.fitted_data_transform[transform_names[w]] = fit_xyz_transform(w)
+                    self.fitted_data_transform[transform_names[w]] = _fit_xyz_transform(w)
                 # Now transform whole array
-                array = fit_transform()[1]
+                array = _fit_transform()[1]
             
             else:
+                for w in node_dict.keys():
+                    self.fitted_data_transform
                 
 
         # Fit the model 
