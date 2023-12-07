@@ -716,7 +716,10 @@ class DataFrame():
             outputs the cleaned XYZ lists. If return_macro_nodes is True, also
             outputs the macro_nodes array and node_dict, which together provide
             the macro-information that would otherwise be lost during the creation
-            of the array from a vectorized dataset.
+            of the array from a vectorized dataset. Node dict defines macro 
+            node-and-lag indices in terms of their (var, lag) tuple and their length,
+            while macro_nodes identifies which macro node-and-lag provided each entry 
+            in the returned 'array'.
         """
 
         # # This version does not yet work with bootstrap
@@ -734,7 +737,8 @@ class DataFrame():
         
         #assume no overlap here -- should be checked before arguments are passed in.
         all_nodes = X+Y+Z+extraZ
-        #dictionary that maps ints which will appear in MACRO_NODES array to a tuple of macro (var, lag) pairs and the length of the vector
+        #macro-nodes may appear multiple times in all_nodes at different lags. So we define new macro indeces, and the following
+        #dict maps these indices to the macro tuple (var, lag) and the length of this node.
         node_dict = {i: (all_nodes[i], self.vector_lengths[all_nodes[i][0]]) for i in range(len(all_nodes))}
         #array like xyz which shows which macro (var, lag) pair the microvariables in OBSERVATION_ARRAY come from.
         macro_nodes = np.array([k for k in node_dict.keys() for i in range(node_dict[k][1])])
@@ -752,13 +756,13 @@ class DataFrame():
         Z = vectorize(Z) 
         extraZ = vectorize(extraZ) 
 
-        # Remove duplicates in X, Y, Z, extraZ
-        X = list(OrderedDict.fromkeys(X))
-        Y = list(OrderedDict.fromkeys(Y))
-        Z = list(OrderedDict.fromkeys(Z))
-        extraZ = list(OrderedDict.fromkeys(extraZ))
-
         if remove_overlaps:
+            # Remove duplicates in X, Y, Z, extraZ
+            #Changed so we only do this when remove_overlaps=True
+            X = list(OrderedDict.fromkeys(X))
+            Y = list(OrderedDict.fromkeys(Y))
+            Z = list(OrderedDict.fromkeys(Z))
+            extraZ = list(OrderedDict.fromkeys(extraZ))
             # If a node in Z occurs already in X or Y, remove it from Z
             #TODO: if we ask to condition on a node, shouldn't we actually remove it from Y?
             #Couldn't there theoretically also be overlaps between X and Y?
@@ -972,10 +976,10 @@ class DataFrame():
 
         # Return the array and xyz and optionally (X, Y, Z) and/or macro node information
         if return_macro_nodes and return_cleaned_xyz:
-            return array, xyz, (X, Y, Z), macro_nodes, node_array, type_array
+            return array, xyz, (X, Y, Z), macro_nodes, node_dict, type_array
         
         if return_macro_nodes:
-            return array, xyz, macro_nodes, node_array, type_array
+            return array, xyz, macro_nodes, node_dict, type_array
         
         if return_cleaned_xyz:
             return array, xyz, (X, Y, Z), type_array
