@@ -1,3 +1,4 @@
+
 """Tigramite causal inference for time series."""
 
 # Author: Jakob Runge <jakob@jakob-runge.com>
@@ -94,7 +95,8 @@ class Models():
                 tau_max=None,
                 cut_off='max_lag_or_tau_max',
                 empty_predictors_function=np.mean,
-                return_data=False):
+                return_data=False,
+                macro_transforms=True): #it's possible this should be a model definition issue not a function call parameter
         """Fit time series model.
 
         For each variable in selected_variables, the sklearn model is fitted
@@ -120,6 +122,12 @@ class Models():
             Function to apply to y if no predictors are given.
         return_data : bool, optional (default: False)
             Whether to save the data array.
+        macro_transforms : bool, optional (default: True)
+            When False, the data transforms are performed on the microdata without
+            regard to the definition of macro-nodes. When True, the data transforms
+            are applied to the data associated with each macro-node separately. 
+            Set to False to retrieve original functionality. True produces the new
+            default behavior.
 
         Returns
         -------
@@ -180,37 +188,43 @@ class Models():
                                            tau_max=self.tau_max,
                                            mask_type=self.mask_type,
                                            cut_off=self.cut_off,
-                                           remove_overlaps=True,
+                                           remove_overlaps=False, #changed!
                                            verbosity=self.verbosity,
                                            return_macro_nodes=True)
 
-        #assumes that xyz will not be re-defined; is local. TODO maybe want non-local version
+        #assumes the array XYZ returned above will not be changed. Is thus local in a way.
         def get_indices(n):
             return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
         
+        def fit_transform(n):
+            loc_indices = get_indices(n)
+            loc_transform = deepcopy(self.data_transform)
+            loc_transform.fit(array[loc_indices, :].T)
+            return loc_transform
+            
+        transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
+            
         # Transform the data if needed
         self.fitted_data_transform = None
         if self.data_transform is not None:
-            # Fit only X, Y, and S for later use in transforming input
-            X_transform = deepcopy(self.data_transform)
-            x_indices = get_indices('x')
-            X_transform.fit(array[x_indices, :].T)
-            self.fitted_data_transform = {'X': X_transform}
-            Y_transform = deepcopy(self.data_transform)
-            y_indices = get_indices('y')
-            Y_transform.fit(array[y_indices, :].T)
-            self.fitted_data_transform['Y'] = Y_transform
-            #TODO why do we need a separate transform for S=Z=conditions and not for extra_Z?
-            if len(self.conditions) > 0:
-                S_transform = deepcopy(self.data_transform)
-                s_indices = get_indices('z')
-                S_transform.fit(array[s_indices, :].T) 
-                self.fitted_data_transform['S'] = S_transform
-
-            #TODO not all transformations are the same! PCA?
-            # Now transform whole array
-            all_transform = deepcopy(self.data_transform)
-            array = all_transform.fit_transform(X=array.T).T
+            self.fitted_data_transform = {}
+            
+            #original functionality. assumes that transforms work element-wise (does not hold for PCA)
+            if not macro_transforms:
+                # Fit only X, Y, and S for later use in transforming input
+                #TODO why do we need a separate transform for S=Z=conditions and not for extra_Z?
+                if len(self.conditions) == 0:
+                    sep_transforms = ['x', 'y']
+                else:
+                    sep_transforms = transform_names.keys()
+                for w in sep_transforms:
+                    self.fitted_data_transform[transform_names[w]] = fit_transform(w)
+                # Now transform whole array
+                all_transform = deepcopy(self.data_transform)
+                array = all_transform.fit_transform(X=array.T).T
+            
+            else:
+                
 
         # Fit the model 
         # Copy and fit the model
