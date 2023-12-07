@@ -197,20 +197,29 @@ class Models():
         def _get_macro_node(i):
             return list(np.where(macro_nodes==i))
         
+        #selects appropriate indices and transposes to be in the correct orientation for sklearn.
+        def _to_sklearn(A, loc_indices):
+            if loc_indices is not None:
+                loc_array = A[loc_indices, :]
+            else:
+                loc_array = A
+            return loc_array.T
+        
+        #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
+        def _from_sklearn(A):
+            return A.T
+        
         #fits transform and returns transformed `array`, where loc_indices can select
         #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
         #can accomodate a list of transforms in the order of intended application. In this case, 
         #it will return a tuple with a list of fitted transforms and then the transformed data.
         def _fit_transform(loc_indices=None):
-            if loc_indices is not None:
-                loc_array = array[loc_indices, :]
-            else:
-                loc_array = array
+            loc_array = _to_sklearn(array, loc_indices)
             DFs = list(self.data_transform) #allows use of list or single transform
             fDFs = []
             for df in DFs:
                 loc_transform = deepcopy(df)
-                loc_array = loc_transform.fit_transform(loc_array.T).T
+                loc_array = _from_sklearn(loc_transform.fit_transform(loc_array)) 
                 fDFs += [loc_transform]
             if len(fDFs)==1:
                 fDFs = fDFs[0]
@@ -260,14 +269,12 @@ class Models():
         # Copy and fit the model
         a_model = deepcopy(self.model)
 
-        predictor_indices =  _get_indices('x') \
-                           + _get_indices('e') \
-                           + _get_indices('z')
-        
-        
-        
-        predictor_array = array[predictor_indices, :].T
-        target_array = array[np.array(_get_indices('y')), :].T
+        predictor_indices = []
+        for n in ['x', 'e', 'z']:
+            predictor_indices+= _get_indices(n)
+                
+        predictor_array = _to_sklearn(array, predictor_indices)
+        target_array = _to_sklearn(array, _get_indices('y'))
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
