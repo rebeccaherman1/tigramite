@@ -189,7 +189,7 @@ class Models():
         #the following functions assume the arrays returned above (xyz, macro_nodes, array)
         #will not be changed. 
         
-        #finds rows in `array` that correspond to X, Y, Z, or extraZ.
+        #finds rows in `array` that correspond to xyz
         def _get_indices(n):
             return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
         
@@ -234,18 +234,15 @@ class Models():
         def _fit_macro_transform(i):
             loc_indices = _get_macro_nodes(i)
             return _fit_transform(loc_indices)
-            
-        transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
-            
-        #TODO it would be potentially nice to be able to have a list of transforms?
-            
-        # Transform the data if needed
+                                    
+        # Transform the data if needed. updates 'array' in place, as well as 'xyz'
         self.fitted_data_transform = None
         if self.data_transform is not None:
             self.fitted_data_transform = {}
             
             #original functionality. assumes that transforms work element-wise (does not hold for PCA)
             if not self.transform_macro:
+                transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
                 # Fit only X, Y, and S for later use in transforming input
                 #TODO why do we need a separate transform for S=Z=conditions and not for extra_Z?
                 if len(self.conditions) == 0:
@@ -257,21 +254,39 @@ class Models():
                 # Now transform whole array
                 array = _fit_transform()[1]
             
-            #my current plan is to store the transforms by macro (var, lag), and check if they are in self.X later.
+            #store the transforms by macro (var, lag), and make a new xyz array. 
+            #Can access X transforms later by looking at self.X
             else:
+                #used to construct new xyz array
+                transformed_translator = {}
+                #this must be in the same order as done in data_processing construct_array
+                N_lst = [self.X,self.Y,self.conditions,self.Z]
+                # X (self.X, 'x'), Y (self.Y, 'y'), Z (self.conditions, 'z', self.lenS), or extraZ (self.Z, 'e').
+                n_lst = ['x', 'y', 'z', 'e']
+                for i in range(len(N_lst)):
+                    N = N_lst[i]
+                    for varlag in N:
+                        transformed_translator[varlag] = self.dataframe.get_index_code(n_lst[i]) 
+                        
                 array_list = []
+                xyz_list = []
                 for w in node_dict.keys():
-                    self.fitted_data_transform[node_dict[w][0]], p_array = _fit_macro_transform(w)
+                    varlag = node_dict[w][0]
+                    self.fitted_data_transform[varlag], p_array = _fit_macro_transform(w)
                     array_list += [p_array]
+                    xyz_list += [transformed_translator[varlag]]*p_array.size[0] #elements are rows
                 array = np.concatenate(array_list)
-
+                #update xyz, should update what is used in the helper function as well.
+                xyz = np.array(xyz_list)
+                                
         # Fit the model 
         # Copy and fit the model
         a_model = deepcopy(self.model)
 
+        #requires new, transformed xyz matrix
         predictor_indices = []
         for n in ['x', 'e', 'z']:
-            predictor_indices+= _get_indices(n)
+            predictor_indices += _get_indices(n)
                 
         predictor_array = _to_sklearn(array, predictor_indices)
         target_array = _to_sklearn(array, _get_indices('y'))
