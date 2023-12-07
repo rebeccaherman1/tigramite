@@ -42,6 +42,7 @@ class Models():
         sklearn.preprocessing.StandardScaler for simple standardization. The
         fitted parameters are stored. Note that the inverse_transform is then
         applied to the predicted data
+        A list of transforms can be accomodated when transform_macro is True.
     transform_macro : boolean, optional (default: dataframe.vectorized)
         Determines whether the data_transform should be applied to the data matrix
         as a whole, or should be applied to macro-nodes individually. Recommended
@@ -95,8 +96,7 @@ class Models():
                 tau_max=None,
                 cut_off='max_lag_or_tau_max',
                 empty_predictors_function=np.mean,
-                return_data=False,
-                macro_transforms=True): #it's possible this should be a model definition issue not a function call parameter
+                return_data=False): #it's possible this should be a model definition issue not a function call parameter
         """Fit time series model.
 
         For each variable in selected_variables, the sklearn model is fitted
@@ -122,12 +122,6 @@ class Models():
             Function to apply to y if no predictors are given.
         return_data : bool, optional (default: False)
             Whether to save the data array.
-        macro_transforms : bool, optional (default: True)
-            When False, the data transforms are performed on the microdata without
-            regard to the definition of macro-nodes. When True, the data transforms
-            are applied to the data associated with each macro-node separately. 
-            Set to False to retrieve original functionality. True produces the new
-            default behavior.
 
         Returns
         -------
@@ -205,14 +199,22 @@ class Models():
         
         #fits transform and returns transformed `array`, where loc_indices can select
         #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
+        #can accomodate a list of transforms in the order of intended application. In this case, 
+        #it will return a tuple with a list of fitted transforms and then the transformed data.
         def _fit_transform(loc_indices=None):
             if loc_indices is not None:
                 loc_array = array[loc_indices, :]
             else:
                 loc_array = array
-            loc_transform = deepcopy(self.data_transform)
-            X_tr = loc_transform.fit_transform(loc_array.T).T
-            return (loc_transform, X_tr)
+            DFs = list(self.data_transform) #allows use of list or single transform
+            fDFs = []
+            for df in DFs:
+                loc_transform = deepcopy(df)
+                loc_array = loc_transform.fit_transform(loc_array.T).T
+                fDFs += [loc_transform]
+            if len(fDFs)==1:
+                fDFs = fDFs[0]
+            return (fDFs, loc_array)
         
         #transforms data divided by XYZ. Returns only the fitted transform.
         def _fit_xyz_transform(n):
@@ -226,13 +228,15 @@ class Models():
             
         transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
             
+        #TODO it would be potentially nice to be able to have a list of transforms?
+            
         # Transform the data if needed
         self.fitted_data_transform = None
         if self.data_transform is not None:
             self.fitted_data_transform = {}
             
             #original functionality. assumes that transforms work element-wise (does not hold for PCA)
-            if not macro_transforms:
+            if not self.transform_macro:
                 # Fit only X, Y, and S for later use in transforming input
                 #TODO why do we need a separate transform for S=Z=conditions and not for extra_Z?
                 if len(self.conditions) == 0:
@@ -244,20 +248,26 @@ class Models():
                 # Now transform whole array
                 array = _fit_transform()[1]
             
+            #my current plan is to store the transforms by macro (var, lag), and check if they are in self.X later.
             else:
+                array_list = []
                 for w in node_dict.keys():
-                    self.fitted_data_transform
-                
+                    self.fitted_data_transform[node_dict[w][0]], p_array = _fit_macro_transform(w)
+                    array_list += [p_array]
+                array = np.concatenate(array_list)
 
         # Fit the model 
         # Copy and fit the model
         a_model = deepcopy(self.model)
 
-        predictor_indices =  get_indices('x') \
-                           + get_indices('e') \
-                           + get_indices('z')
+        predictor_indices =  _get_indices('x') \
+                           + _get_indices('e') \
+                           + _get_indices('z')
+        
+        
+        
         predictor_array = array[predictor_indices, :].T
-        target_array = array[np.array(get_indices('y')), :].T
+        target_array = array[np.array(_get_indices('y')), :].T
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
@@ -280,6 +290,8 @@ class Models():
         fit_results['model'] = a_model
         # Cache the data transform
         fit_results['fitted_data_transform'] = self.fitted_data_transform
+        fit_results['macro_nodes'] = macro_nodes
+        fit_results['node_dict'] = node_dict
 
         # Cache and return the fit results
         self.fit_results = fit_results
