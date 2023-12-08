@@ -1825,6 +1825,7 @@ class CausalEffects():
         data_transform=None,
         mask_type=None,
         ignore_identifiability=False,
+        transform_macro=None
         ):
         """Returns a fitted model for the total causal effect of X on Y 
            conditional on S.
@@ -1856,6 +1857,10 @@ class CausalEffects():
         ignore_identifiability : bool
             Only applies to adjustment sets supplied by user. Ignores if that 
             set leads to a non-identifiable effect.
+        transform_macro : boolean, optional (default: dataframe.vectorized)
+            Determines whether the data_transform should be applied to the data matrix
+            as a whole, or should be applied to macro-nodes individually. Recommended
+            for vectorized dataframes; defaults to whether the dataframe is vectorized.
         """
 
         if self.no_causal_path:
@@ -1899,7 +1904,8 @@ class CausalEffects():
                         conditional_model=conditional_estimator,
                         data_transform=data_transform,
                         mask_type=mask_type,
-                        verbosity=self.verbosity)      
+                        verbosity=self.verbosity
+                        transform_macro=transform_macro)      
 
         self.model.get_general_fitted_model(
                 Y=self.listY, X=self.listX, Z=list(self.adjustment_set),
