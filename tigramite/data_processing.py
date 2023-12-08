@@ -414,7 +414,7 @@ class DataFrame():
                            'z' : 2,
                            'e' : 3}
 
-    def get_index_code(n):
+    def get_index_code(self, n):
         return self.index_code[n]
 
     def _check_mask(self, mask, check_data_type=False):
@@ -810,7 +810,7 @@ class DataFrame():
         else:
             raise ValueError("max_lag must be in {'2xtau_max', 'tau_max', 'max_lag', "\
                 "'max_lag_or_tau_max', '2xtau_max_future'}")
-
+            
         #TODO make this an accessible function
         xyz = np.array([self.get_index_code(name)
                         for var, name in zip([X, Y, Z, extraZ], ['x', 'y', 'z', 'e'])

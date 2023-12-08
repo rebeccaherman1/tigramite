@@ -1904,7 +1904,7 @@ class CausalEffects():
                         conditional_model=conditional_estimator,
                         data_transform=data_transform,
                         mask_type=mask_type,
-                        verbosity=self.verbosity
+                        verbosity=self.verbosity,
                         transform_macro=transform_macro)      
 
         self.model.get_general_fitted_model(

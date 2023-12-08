@@ -90,32 +90,32 @@ class Models():
         self.fit_results = None
         
     #finds rows in `array` that correspond to xyz
-    def _get_indices(xyz, n):
+    def _get_indices(self, xyz, n):
         return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
     
     #finds rows in `array` that correspond to the ith macro (var, lag). 
-    def _get_macro_node(macro_nodes, i):
+    def _get_macro_node(self, macro_nodes, i):
         return list(np.where(macro_nodes==i))
 
     #selects appropriate indices and transposes to be in the correct orientation for sklearn.
-    def _to_sklearn(A, loc_indices=None):
+    def _to_sklearn(self, A, loc_indices=None):
         if loc_indices is not None:
             A = _select_tig(A, loc_indices)
         return A.T
 
     #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
-    def _from_sklearn(A):
+    def _from_sklearn(self, A):
         return A.T
     
     #sklearn operates with (n_samples, n_features)
-    def _select_tig(A, loc_indices):
+    def _select_tig(self, A, loc_indices):
         return A[loc_indices,:]
 
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
     #can accomodate a list of transforms in the order of intended application. In this case, 
     #it will return a tuple with a list of fitted transforms and then the transformed data.
-    def _fit_transform(array, loc_indices=None):
+    def _fit_transform(self, array, loc_indices=None):
         loc_array = _to_sklearn(array, loc_indices)
         DFs = list(self.data_transform) #allows use of list or single transform
         fDFs = []
@@ -128,12 +128,12 @@ class Models():
         return (fDFs, loc_array)
 
     #transforms data divided by XYZ. Returns only the fitted transform.
-    def _fit_xyz_transform(array, xyz, n):
+    def _fit_xyz_transform(self, array, xyz, n):
         loc_indices = _get_indices(xyz, n)
         return _fit_transform(array, loc_indices)[0]
 
     #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
-    def _fit_macro_transform(array, macro_nodes, i):
+    def _fit_macro_transform(self, array, macro_nodes, i):
         loc_indices = _get_macro_node(macro_nodes, i)
         return _fit_transform(array, loc_indices)
 
