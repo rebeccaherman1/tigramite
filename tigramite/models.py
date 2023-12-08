@@ -100,7 +100,7 @@ class Models():
     #selects appropriate indices and transposes to be in the correct orientation for sklearn.
     def _to_sklearn(self, A, loc_indices=None):
         if loc_indices is not None:
-            A = _select_tig(A, loc_indices)
+            A = self._select_tig(A, loc_indices)
         return A.T
 
     #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
@@ -116,12 +116,12 @@ class Models():
     #can accomodate a list of transforms in the order of intended application. In this case, 
     #it will return a tuple with a list of fitted transforms and then the transformed data.
     def _fit_transform(self, array, loc_indices=None):
-        loc_array = _to_sklearn(array, loc_indices)
+        loc_array = self._to_sklearn(array, loc_indices)
         DFs = list(self.data_transform) #allows use of list or single transform
         fDFs = []
         for df in DFs:
             loc_transform = deepcopy(df)
-            loc_array = _from_sklearn(loc_transform.fit_transform(loc_array)) 
+            loc_array = self._from_sklearn(loc_transform.fit_transform(loc_array)) 
             fDFs += [loc_transform]
         if len(fDFs)==1:
             fDFs = fDFs[0]
@@ -129,13 +129,13 @@ class Models():
 
     #transforms data divided by XYZ. Returns only the fitted transform.
     def _fit_xyz_transform(self, array, xyz, n):
-        loc_indices = _get_indices(xyz, n)
-        return _fit_transform(array, loc_indices)[0]
+        loc_indices = self._get_indices(xyz, n)
+        return self._fit_transform(array, loc_indices)[0]
 
     #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
     def _fit_macro_transform(self, array, macro_nodes, i):
-        loc_indices = _get_macro_node(macro_nodes, i)
-        return _fit_transform(array, loc_indices)
+        loc_indices = self._get_macro_node(macro_nodes, i)
+        return self._fit_transform(array, loc_indices)
 
     # @profile    
     def get_general_fitted_model(self, 
@@ -249,9 +249,9 @@ class Models():
                 else:
                     sep_transforms = transform_names.keys()
                 for w in sep_transforms:
-                    self.fitted_data_transform[transform_names[w]] = _fit_xyz_transform(array, xyz, w)
+                    self.fitted_data_transform[transform_names[w]] = self._fit_xyz_transform(array, xyz, w)
                 # Now transform whole array
-                array = _fit_transform(array)[1]
+                array = self._fit_transform(array)[1]
             
             #store the transforms by macro (var, lag), and make a new xyz array. 
             #Can access X transforms later by looking at self.X
@@ -274,7 +274,7 @@ class Models():
                 xyz_list = []
                 for w in node_dict.keys():
                     varlag = node_dict[w][0]
-                    self.fitted_data_transform[varlag], p_array = _fit_macro_transform(array, macro_nodes, w)
+                    self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, w)
                     array_list += [p_array]
                     xyz_list += [transformed_translator[varlag]]*p_array.size[0] #elements are rows
                 array = np.concatenate(array_list) #in language of tigramite
@@ -288,12 +288,12 @@ class Models():
         #requires new, transformed xyz matrix
         predictor_indices = []
         for n in ['x', 'e', 'z']:
-            predictor_indices += _get_indices(xyz, n)
+            predictor_indices += self._get_indices(xyz, n)
         
         #TODO maybe this doesn't need to be transposed again?!?!
         #Is OBSERVATION_ARRAY not consistent in terms of orientation?
-        predictor_array = _to_sklearn(array, predictor_indices)
-        target_array = _to_sklearn(array, _get_indices(xyz, 'y'))
+        predictor_array = self._to_sklearn(array, predictor_indices)
+        target_array = self._to_sklearn(array, self._get_indices(xyz, 'y'))
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
@@ -413,7 +413,7 @@ class Models():
             data_list = []
             for varlag in N:
                 if to_sklearn:
-                    data=_to_sklearn(data, lengths[var_lag])
+                    data=self._to_sklearn(data, lengths[var_lag])
                 T = fitted_data_transform[varlag]
                 if inverse:
                     X = T.inverse_transform(X=data)
@@ -425,7 +425,7 @@ class Models():
         
         def xyz_transform(fitted_data_transform, N, data, to_sklearn=True):
             if to_sklearn:
-                data = _to_sklearn(data)
+                data = self._to_sklearn(data)
             #stay in sklearn format
             return fitted_data_transform[N].transform(X=data)
             
@@ -443,16 +443,16 @@ class Models():
                     conditions_data = macro_transform(fitted_data_transform, self.conditions, conditions_data, to_sklearn=False)
                 
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
-        z_array = _to_sklearn(self.fit_results['observation_array'], 
-                              _get_indices(self.fit_results['xyz'], 'e'))
+        z_array = self._to_sklearn(self.fit_results['observation_array'], 
+                              self._get_indices(self.fit_results['xyz'], 'e'))
         #time length?
         Tobs = z_array.shape[0]
 
         #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
         #Use observational data if no chosen values were passed in only.
         if self.conditions is not None and conditions_data is None:
-            s_array = _to_sklearn(self.fit_results['observation_array'], 
-                                  _get_indices(self.fit_results['xyz'], 'z')) 
+            s_array = self._to_sklearn(self.fit_results['observation_array'], 
+                                  self._get_indices(self.fit_results['xyz'], 'z')) 
         
         pred_dict = {}
 
