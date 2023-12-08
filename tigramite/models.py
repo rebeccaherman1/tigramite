@@ -88,6 +88,52 @@ class Models():
         self.selected_variables = None
         self.tau_max = None
         self.fit_results = None
+        
+    #finds rows in `array` that correspond to xyz
+    def _get_indices(xyz, n):
+        return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
+    
+    #finds rows in `array` that correspond to the ith macro (var, lag). 
+    def _get_macro_node(macro_nodes, i):
+        return list(np.where(macro_nodes==i))
+
+    #selects appropriate indices and transposes to be in the correct orientation for sklearn.
+    def _to_sklearn(A, loc_indices):
+        if loc_indices is not None:
+            loc_array = A[loc_indices, :]
+        else:
+            loc_array = A
+        return loc_array.T
+
+    #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
+    def _from_sklearn(A):
+        return A.T
+
+    #fits transform and returns transformed `array`, where loc_indices can select
+    #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
+    #can accomodate a list of transforms in the order of intended application. In this case, 
+    #it will return a tuple with a list of fitted transforms and then the transformed data.
+    def _fit_transform(array, loc_indices=None):
+        loc_array = _to_sklearn(array, loc_indices)
+        DFs = list(self.data_transform) #allows use of list or single transform
+        fDFs = []
+        for df in DFs:
+            loc_transform = deepcopy(df)
+            loc_array = _from_sklearn(loc_transform.fit_transform(loc_array)) 
+            fDFs += [loc_transform]
+        if len(fDFs)==1:
+            fDFs = fDFs[0]
+        return (fDFs, loc_array)
+
+    #transforms data divided by XYZ. Returns only the fitted transform.
+    def _fit_xyz_transform(array, xyz, n):
+        loc_indices = _get_indices(xyz, n)
+        return _fit_transform(array, loc_indices)[0]
+
+    #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
+    def _fit_macro_transform(array, macro_nodes, i):
+        loc_indices = _get_macro_node(macro_nodes, i)
+        return _fit_transform(array, loc_indices)
 
     # @profile    
     def get_general_fitted_model(self, 
@@ -185,55 +231,6 @@ class Models():
                                            remove_overlaps=False, #changed!
                                            verbosity=self.verbosity,
                                            return_macro_nodes=True)
-
-        #the following functions assume the arrays returned above (xyz, macro_nodes, array)
-        #will not be changed. 
-        
-        #finds rows in `array` that correspond to xyz
-        def _get_indices(n):
-            return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
-        
-        #finds rows in `array` that correspond to the ith macro (var, lag). 
-        def _get_macro_node(i):
-            return list(np.where(macro_nodes==i))
-        
-        #selects appropriate indices and transposes to be in the correct orientation for sklearn.
-        def _to_sklearn(A, loc_indices):
-            if loc_indices is not None:
-                loc_array = A[loc_indices, :]
-            else:
-                loc_array = A
-            return loc_array.T
-        
-        #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
-        def _from_sklearn(A):
-            return A.T
-        
-        #fits transform and returns transformed `array`, where loc_indices can select
-        #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
-        #can accomodate a list of transforms in the order of intended application. In this case, 
-        #it will return a tuple with a list of fitted transforms and then the transformed data.
-        def _fit_transform(loc_indices=None):
-            loc_array = _to_sklearn(array, loc_indices)
-            DFs = list(self.data_transform) #allows use of list or single transform
-            fDFs = []
-            for df in DFs:
-                loc_transform = deepcopy(df)
-                loc_array = _from_sklearn(loc_transform.fit_transform(loc_array)) 
-                fDFs += [loc_transform]
-            if len(fDFs)==1:
-                fDFs = fDFs[0]
-            return (fDFs, loc_array)
-        
-        #transforms data divided by XYZ. Returns only the fitted transform.
-        def _fit_xyz_transform(n):
-            loc_indices = _get_indices(n)
-            return _fit_transform(loc_indices)[0]
-        
-        #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
-        def _fit_macro_transform(i):
-            loc_indices = _get_macro_nodes(i)
-            return _fit_transform(loc_indices)
                                     
         # Transform the data if needed. updates 'array' in place, as well as 'xyz'
         self.fitted_data_transform = None
@@ -250,9 +247,9 @@ class Models():
                 else:
                     sep_transforms = transform_names.keys()
                 for w in sep_transforms:
-                    self.fitted_data_transform[transform_names[w]] = _fit_xyz_transform(w)
+                    self.fitted_data_transform[transform_names[w]] = _fit_xyz_transform(array, xyz, w)
                 # Now transform whole array
-                array = _fit_transform()[1]
+                array = _fit_transform(array)[1]
             
             #store the transforms by macro (var, lag), and make a new xyz array. 
             #Can access X transforms later by looking at self.X
@@ -261,7 +258,10 @@ class Models():
                 transformed_translator = {}
                 #this must be in the same order as done in data_processing construct_array
                 N_lst = [self.X,self.Y,self.conditions,self.Z]
-                # X (self.X, 'x'), Y (self.Y, 'y'), Z (self.conditions, 'z', self.lenS), or extraZ (self.Z, 'e').
+                # intervention:       X, self.X, 'x'
+                # target:             Y, self.Y, 'y'
+                # imposed conditions: Z, self.conditions, 'z', self.lenS
+                # adjustment set:     extraZ, self.Z, 'e'
                 n_lst = ['x', 'y', 'z', 'e']
                 for i in range(len(N_lst)):
                     N = N_lst[i]
@@ -272,7 +272,7 @@ class Models():
                 xyz_list = []
                 for w in node_dict.keys():
                     varlag = node_dict[w][0]
-                    self.fitted_data_transform[varlag], p_array = _fit_macro_transform(w)
+                    self.fitted_data_transform[varlag], p_array = _fit_macro_transform(array, macro_nodes, w)
                     array_list += [p_array]
                     xyz_list += [transformed_translator[varlag]]*p_array.size[0] #elements are rows
                 array = np.concatenate(array_list)
@@ -286,10 +286,10 @@ class Models():
         #requires new, transformed xyz matrix
         predictor_indices = []
         for n in ['x', 'e', 'z']:
-            predictor_indices += _get_indices(n)
+            predictor_indices += _get_indices(xyz, n)
                 
         predictor_array = _to_sklearn(array, predictor_indices)
-        target_array = _to_sklearn(array, _get_indices('y'))
+        target_array = _to_sklearn(array, _get_indices(xyz, 'y'))
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
@@ -354,6 +354,10 @@ class Models():
         Results from prediction.
         """
 
+        # Check the model is fitted.
+        if self.fit_results is None:
+            raise ValueError("Model not yet fitted.")
+        
         intervention_T, _ = intervention_data.shape
         
         def _calc_transformed_length(n):
@@ -390,26 +394,25 @@ class Models():
         if pred_params is None:
             pred_params = {}
 
-        # Check the model is fitted.
-        if self.fit_results is None:
-            raise ValueError("Model not yet fitted.")
-
         # Transform the data if needed
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
-            intervention_data = fitted_data_transform['X'].transform(X=intervention_data)
-            if self.conditions is not None and conditions_data is not None:
-                conditions_data = fitted_data_transform['S'].transform(X=conditions_data)
+            if not self.transform_macro:
+                intervention_data = fitted_data_transform['X'].transform(X=intervention_data)
+                if self.conditions is not None and conditions_data is not None:
+                    conditions_data = fitted_data_transform['S'].transform(X=conditions_data)
+            else:
+                #TODO transform from self.X and self.S
 
         # Extract observational Z from stored array
-        z_indices = list(np.where(self.fit_results['xyz']==3)[0])
-        z_array = self.fit_results['observation_array'][z_indices, :].T  
-        Tobs = len(self.fit_results['observation_array'].T) 
+        z_array = _to_sklearn(self.fit_results['observation_array'], 
+                              _get_indices(self.fit_results['xyz'], 'e'))
+        Tobs = len(_to_sklearn(self.fit_results['observation_array'])) 
 
         if self.conditions is not None and conditions_data is not None:
-            s_indices = list(np.where(self.fit_results['xyz']==2)[0])
-            s_array = self.fit_results['observation_array'][s_indices, :].T  
-
+            s_array = _to_sklearn(self.fit_results['observation_array'], 
+                                  _get_indices(self.fit_results['xyz'], 'z')) 
+        
         pred_dict = {}
 
         # Now iterate through interventions (and potentially S)
