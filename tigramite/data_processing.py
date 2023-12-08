@@ -328,7 +328,9 @@ class DataFrame():
             if svl != micro_N:
                 raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, micro_N))
             #TODO: write tests to fully test this new functionality
-            vector_vars = {i: [(x+np.sum(vector_lengths[:i]),0) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
+            vector_vars = {
+                i: [(x+np.sum(vector_lengths[:i]),0) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))
+            }
         
         # Setup dictionary of variables for vector mode
         self.vector_vars = vector_vars

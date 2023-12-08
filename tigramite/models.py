@@ -394,22 +394,41 @@ class Models():
         if pred_params is None:
             pred_params = {}
 
-        # Transform the data if needed
+        def get_index_dict(W, vector_lengths):
+            #somewhat redundant with but a bit different (no sum) from get_vectorized_length above
+            vector_lengths = [len(self.dataframe.vector_vars[w[0]]) for w in W]
+            #somewhat redundant with opening logic in data_processing. TODO SINGLE SOURCE OF TRUTH!!!
+            return {W[i]: [x+np.sum(vector_lengths[:i]) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
+        
+        def macro_transform(N, data):
+            lengths = get_index_dict(N)
+            data_list = []
+            for varlag in N:
+                data_list += fitted_data_transform[varlag].transform(
+                    X=_to_sklearn(data, lengths[var_lag]))
+            return np.concatenate(data_list)
+            
+        # Transform the data if needed -- data passed in
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
             if not self.transform_macro:
-                intervention_data = fitted_data_transform['X'].transform(X=intervention_data)
+                #TODO: is there supposed to be a transpose here or not? what was the original?
+                intervention_data = fitted_data_transform['X'].transform(X=_to_sklearn(intervention_data))
                 if self.conditions is not None and conditions_data is not None:
-                    conditions_data = fitted_data_transform['S'].transform(X=conditions_data)
+                    conditions_data = fitted_data_transform['S'].transform(X=_to_sklearn(conditions_data))
             else:
-                #TODO transform from self.X and self.S
-
-        # Extract observational Z from stored array
+                intervention_data = macro_transform(intervention_data, self.X)
+                if self.conditions is not None and conditions_data is not None:
+                    conditions_data = macro_transform(conditions_data, self.conditions)
+                
+        # Extract observational Z from stored array. Already transformed.
         z_array = _to_sklearn(self.fit_results['observation_array'], 
                               _get_indices(self.fit_results['xyz'], 'e'))
         Tobs = len(_to_sklearn(self.fit_results['observation_array'])) 
 
-        if self.conditions is not None and conditions_data is not None:
+        #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
+        #Use observational data if no chosen values were passed in only.
+        if self.conditions is not None and conditions_data is None:
             s_array = _to_sklearn(self.fit_results['observation_array'], 
                                   _get_indices(self.fit_results['xyz'], 'z')) 
         
