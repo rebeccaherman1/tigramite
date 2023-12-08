@@ -98,16 +98,18 @@ class Models():
         return list(np.where(macro_nodes==i))
 
     #selects appropriate indices and transposes to be in the correct orientation for sklearn.
-    def _to_sklearn(A, loc_indices):
+    def _to_sklearn(A, loc_indices=None):
         if loc_indices is not None:
-            loc_array = A[loc_indices, :]
-        else:
-            loc_array = A
-        return loc_array.T
+            A = _select_tig(A, loc_indices)
+        return A.T
 
     #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
     def _from_sklearn(A):
         return A.T
+    
+    #sklearn operates with (n_samples, n_features)
+    def _select_tig(A, loc_indices):
+        return A[loc_indices,:]
 
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
@@ -231,7 +233,7 @@ class Models():
                                            remove_overlaps=False, #changed!
                                            verbosity=self.verbosity,
                                            return_macro_nodes=True)
-                                    
+                                            
         # Transform the data if needed. updates 'array' in place, as well as 'xyz'
         self.fitted_data_transform = None
         if self.data_transform is not None:
@@ -275,7 +277,7 @@ class Models():
                     self.fitted_data_transform[varlag], p_array = _fit_macro_transform(array, macro_nodes, w)
                     array_list += [p_array]
                     xyz_list += [transformed_translator[varlag]]*p_array.size[0] #elements are rows
-                array = np.concatenate(array_list)
+                array = np.concatenate(array_list) #in language of tigramite
                 #update xyz, should update what is used in the helper function as well.
                 xyz = np.array(xyz_list)
                                 
@@ -287,7 +289,9 @@ class Models():
         predictor_indices = []
         for n in ['x', 'e', 'z']:
             predictor_indices += _get_indices(xyz, n)
-                
+        
+        #TODO maybe this doesn't need to be transposed again?!?!
+        #Is OBSERVATION_ARRAY not consistent in terms of orientation?
         predictor_array = _to_sklearn(array, predictor_indices)
         target_array = _to_sklearn(array, _get_indices(xyz, 'y'))
 
@@ -307,7 +311,7 @@ class Models():
         
         # Cache the results
         fit_results = {}
-        fit_results['observation_array'] = array
+        fit_results['observation_array'] = array #in language of tigramite: (var, time)
         fit_results['xyz'] = xyz
         fit_results['model'] = a_model
         # Cache the data transform
@@ -335,9 +339,9 @@ class Models():
         Parameters
         ----------
         intervention_data : numpy array
-            Numpy array of shape (time, len(X)) that contains the do(X) values.
+            Numpy array of shape (N interventions, len(X)) that contains the do(X) values.
         conditions_data : data object, optional
-            Numpy array of shape (time, len(S)) that contains the S=s values.
+            Numpy array of shape (N interventions, len(S)) that contains the S=s values.
         pred_params : dict, optional
             Optional parameters passed on to sklearn prediction function (model and
             conditional_model).
@@ -354,6 +358,9 @@ class Models():
         Results from prediction.
         """
 
+        #data that's passed in is of shape (N interventions, N features), while
+        #data from observation_array is of shape (N features, time)
+        
         # Check the model is fitted.
         if self.fit_results is None:
             raise ValueError("Model not yet fitted.")
@@ -368,18 +375,19 @@ class Models():
                     "{} ({}) must equal the vectorized length of {} in the {} dataframe ({}).".format(
                         a_name, a, b_name, dataframe_type, b)
                 )
+                
+        TlenX = _calc_transformed_length('x')
+        TlenS = _calc_transformed_length('z')
 
         if transform_interventions_and_prediction:
             _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
         else:
-            _check_error(intervention_data.shape[1], _calc_transformed_length('x'), 
-                         "intervention_data.shape[1]", 'X', 'transformed')
+            _check_error(intervention_data.shape[1], TlenX, "intervention_data.shape[1]", 'X', 'transformed')
         if conditions_data is not None:
             if transform_interventions_and_prediction:
                 _check_error(conditions_data.shape[1], self.lenS, "conditions_data.shape[1]", 'S', "original")
             else:
-                _check_error(conditions_data.shape[1], _calc_transformed_length('z'),
-                             "conditions_data.shape[1]", 'S', 'transformed')
+                _check_error(conditions_data.shape[1], TlenS, "conditions_data.shape[1]", 'S', 'transformed')
             if conditions_data.shape[0] != intervention_data.shape[0]:
                 raise ValueError("conditions_data.shape[0] must match intervention_data.shape[0].")
 
@@ -400,31 +408,45 @@ class Models():
             #somewhat redundant with opening logic in data_processing. TODO SINGLE SOURCE OF TRUTH!!!
             return {W[i]: [x+np.sum(vector_lengths[:i]) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
         
-        def macro_transform(N, data):
+        def macro_transform(fitted_data_transform, N, data, to_sklearn=True, inverse=False):
             lengths = get_index_dict(N)
             data_list = []
             for varlag in N:
-                data_list += fitted_data_transform[varlag].transform(
-                    X=_to_sklearn(data, lengths[var_lag]))
-            return np.concatenate(data_list)
+                if to_sklearn:
+                    data=_to_sklearn(data, lengths[var_lag])
+                T = fitted_data_transform[varlag]
+                if inverse:
+                    X = T.inverse_transform(X=data)
+                else: 
+                    X = T.transform(X=data)
+                #stay in sklearn format
+                data_list += X
+            return np.concatenate(data_list, axis=1)
+        
+        def xyz_transform(fitted_data_transform, N, data, to_sklearn=True):
+            if to_sklearn:
+                data = _to_sklearn(data)
+            #stay in sklearn format
+            return fitted_data_transform[N].transform(X=data)
             
-        # Transform the data if needed -- data passed in
+        # Transform the data if needed -- data passed in. Return as (N interventions, N features)
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
             if not self.transform_macro:
-                #TODO: is there supposed to be a transpose here or not? what was the original?
-                intervention_data = fitted_data_transform['X'].transform(X=_to_sklearn(intervention_data))
+                #still in language of tigramite (unsure about original)
+                intervention_data = xyz_transform(fitted_data_transform, 'X', intervention_data, to_sklearn=False)
                 if self.conditions is not None and conditions_data is not None:
-                    conditions_data = fitted_data_transform['S'].transform(X=_to_sklearn(conditions_data))
+                    conditions_data = xyz_transform(fitted_data_transform, 'S', conditions_data, to_sklearn=False)
             else:
-                intervention_data = macro_transform(intervention_data, self.X)
+                intervention_data = macro_transform(fitted_data_transform, self.X, intervention_data)
                 if self.conditions is not None and conditions_data is not None:
-                    conditions_data = macro_transform(conditions_data, self.conditions)
+                    conditions_data = macro_transform(fitted_data_transform, self.conditions, conditions_data, to_sklearn=False)
                 
-        # Extract observational Z from stored array. Already transformed.
+        # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
         z_array = _to_sklearn(self.fit_results['observation_array'], 
                               _get_indices(self.fit_results['xyz'], 'e'))
-        Tobs = len(_to_sklearn(self.fit_results['observation_array'])) 
+        #time length?
+        Tobs = z_array.shape[0]
 
         #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
         #Use observational data if no chosen values were passed in only.
@@ -435,11 +457,13 @@ class Models():
         pred_dict = {}
 
         # Now iterate through interventions (and potentially S)
+        # enumerate will iterate through ROWs -- ok when (N interventions, N features)
         for index, dox_vals in enumerate(intervention_data):
             # Construct XZS-array
-            intervention_array = dox_vals.reshape(1, self.lenX) * np.ones((Tobs, self.lenX))
+            #TODO why is this reshape necessary?
+            intervention_array = dox_vals.reshape(1, TlenX) * np.ones((Tobs, TlenX))
             if self.conditions is not None and conditions_data is not None:
-                conditions_array = conditions_data[index].reshape(1, self.lenS) * np.ones((Tobs, self.lenS))  
+                conditions_array = conditions_data[index].reshape(1, TlenS) * np.ones((Tobs, TlenS))  
                 predictor_array = np.hstack((intervention_array, z_array, conditions_array))
             else:
                 predictor_array = np.hstack((intervention_array, z_array))
@@ -463,8 +487,13 @@ class Models():
                     X=conditions_array, **pred_params)
 
             if transform_interventions_and_prediction and fitted_data_transform is not None:
-                predicted_vals = fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
+                if not self.transform_macro:
+                    predicted_vals = fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
+                else:
+                    predicted_vals = (macro_transform(fitted_data_transform, self.Y, predicted_vals, 
+                                                                   to_sklearn=False, inverse=True)
 
+            #(n interventions, n features), whether transform_interventions_and_prediction is True or False
             pred_dict[index] = predicted_vals
 
             # Apply aggregation function
