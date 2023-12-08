@@ -490,7 +490,7 @@ class Models():
                 if not self.transform_macro:
                     predicted_vals = fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
                 else:
-                    predicted_vals = (macro_transform(fitted_data_transform, self.Y, predicted_vals, 
+                    predicted_vals = macro_transform(fitted_data_transform, self.Y, predicted_vals, 
                                                                    to_sklearn=False, inverse=True)
 
             #(n interventions, n features), whether transform_interventions_and_prediction is True or False
