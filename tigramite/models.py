@@ -37,7 +37,7 @@ class Models():
     conditional_model : sklearn model object, optional (default: None)
         Used to fit conditional causal effects in nested regression. 
         If None, model is used.
-    data_transform : sklearn preprocessing object, optional (default: None)
+    data_transform : (list of) sklearn preprocessing object(s), optional (default: None)
         Used to transform data prior to fitting. For example,
         sklearn.preprocessing.StandardScaler for simple standardization. The
         fitted parameters are stored. Note that the inverse_transform is then
@@ -80,7 +80,10 @@ class Models():
         else:
             self.conditional_model = conditional_model
         # Set the data_transform object and verbosity
-        self.data_transform = data_transform
+        if (data_transform is None) or isinstance(data_transform, list):
+            self.data_transform = data_transform
+        else:
+            self.data_transform = [data_transform]
         self.transform_macro = transform_macro
         self.verbosity = verbosity
         # Initialize the object that will be set later
@@ -117,12 +120,12 @@ class Models():
     #it will return a tuple with a list of fitted transforms and then the transformed data.
     def _fit_transform(self, array, loc_indices=None):
         loc_array = self._to_sklearn(array, loc_indices)
-        DFs = list(self.data_transform) #allows use of list or single transform
         fDFs = []
-        for df in DFs:
+        for df in self.data_transform:
             loc_transform = deepcopy(df)
             loc_array = self._from_sklearn(loc_transform.fit_transform(loc_array)) 
             fDFs += [loc_transform]
+        #if it is a single element list, store just the element with no list in fitted data transforms.
         if len(fDFs)==1:
             fDFs = fDFs[0]
         return (fDFs, loc_array)
@@ -249,6 +252,7 @@ class Models():
                 else:
                     sep_transforms = transform_names.keys()
                 for w in sep_transforms:
+                    #each key will correspond to a single transform or to a list of transforms
                     self.fitted_data_transform[transform_names[w]] = self._fit_xyz_transform(array, xyz, w)
                 # Now transform whole array
                 array = self._fit_transform(array)[1]
@@ -408,39 +412,44 @@ class Models():
             #somewhat redundant with opening logic in data_processing. TODO SINGLE SOURCE OF TRUTH!!!
             return {W[i]: [x+np.sum(vector_lengths[:i]) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
         
-        def macro_transform(fitted_data_transform, N, data, to_sklearn=True, inverse=False):
+        def list_transform(T, I, data, to_sklearn=True, inverse=False)
+            if inverse:
+                to_sklearn=False
+            if to_sklearn:
+                data=self._to_sklearn(data, I)
+            if not isinstance(T, list):
+                T = [T]
+            if inverse:
+                for t in T[::-1]:
+                    data = T.inverse_transform(X=data)
+            else: 
+                for t in T:
+                    data = T.transform(X=data)
+            #stay in sklearn format
+            return data
+        
+        def macro_transform(fitted_data_transform, N, data, to_sklearn=False, inverse=False):
             lengths = get_index_dict(N)
             data_list = []
             for varlag in N:
-                if to_sklearn:
-                    data=self._to_sklearn(data, lengths[var_lag])
-                T = fitted_data_transform[varlag]
-                if inverse:
-                    X = T.inverse_transform(X=data)
-                else: 
-                    X = T.transform(X=data)
-                #stay in sklearn format
-                data_list += X
+                data_list += list_transform(fitted_data_transform[varlag], lengths[var_lag], data, to_sklearn, inverse)
             return np.concatenate(data_list, axis=1)
         
-        def xyz_transform(fitted_data_transform, N, data, to_sklearn=True):
-            if to_sklearn:
-                data = self._to_sklearn(data)
-            #stay in sklearn format
-            return fitted_data_transform[N].transform(X=data)
+        def xyz_transform(fitted_data_transform, N, data, to_sklearn=True, inverse=False):
+            return list_transform(fitted_data_transform[N], None, data, to_sklearn=True, inverse=False)
             
         # Transform the data if needed -- data passed in. Return as (N interventions, N features)
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
             if not self.transform_macro:
                 #still in language of tigramite (unsure about original)
-                intervention_data = xyz_transform(fitted_data_transform, 'X', intervention_data, to_sklearn=False)
+                intervention_data = xyz_transform(fitted_data_transform, 'X', intervention_data)
                 if self.conditions is not None and conditions_data is not None:
-                    conditions_data = xyz_transform(fitted_data_transform, 'S', conditions_data, to_sklearn=False)
+                    conditions_data = xyz_transform(fitted_data_transform, 'S', conditions_data)
             else:
                 intervention_data = macro_transform(fitted_data_transform, self.X, intervention_data)
                 if self.conditions is not None and conditions_data is not None:
-                    conditions_data = macro_transform(fitted_data_transform, self.conditions, conditions_data, to_sklearn=False)
+                    conditions_data = macro_transform(fitted_data_transform, self.conditions, conditions_data)
                 
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
         z_array = self._to_sklearn(self.fit_results['observation_array'], 
@@ -488,10 +497,11 @@ class Models():
 
             if transform_interventions_and_prediction and fitted_data_transform is not None:
                 if not self.transform_macro:
-                    predicted_vals = fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
+                    predicted_vals = xyz_transform(fitted_data_transform, 'Y', 
+                                                   predicted_vals, inverse=True).squeeze()
+                    #fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
                 else:
-                    predicted_vals = macro_transform(fitted_data_transform, self.Y, predicted_vals, 
-                                                                   to_sklearn=False, inverse=True)
+                    predicted_vals = macro_transform(fitted_data_transform, self.Y, predicted_vals, inverse=True)
 
             #(n interventions, n features), whether transform_interventions_and_prediction is True or False
             pred_dict[index] = predicted_vals
@@ -599,11 +609,11 @@ class Models():
             dim_z = dim - 2
             # Transform the data if needed
             if self.data_transform is not None:
-                array = self.data_transform.fit_transform(X=array.T).T
+                fDTs, array = _fit_transform(self, array):
             # Cache the results
             fit_results[j] = {}
             # Cache the data transform
-            fit_results[j]['data_transform'] = deepcopy(self.data_transform)
+            fit_results[j]['data_transform'] = fDTs #deepcopy(self.data_transform)
 
             if return_data:
                 # Cache the data if needed
