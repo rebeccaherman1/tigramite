@@ -116,7 +116,9 @@ class Models():
     
     #sklearn operates with (n_samples, n_features)
     def _select_sklearn(self, A, loc_indices):
-        return A[:,loc_indices]
+        if loc_indices:
+            A = A[:,loc_indices]
+        return A
 
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
@@ -437,7 +439,7 @@ class Models():
             return np.concatenate(data_list, axis=1)
         
         def xyz_transform(fitted_data_transform, N, data, inverse=False):
-            return list_transform(fitted_data_transform[N], data, inverse)
+            return list_transform(fitted_data_transform[N], data, inverse=inverse)
             
         # Transform the data if needed -- data passed in. Return as (N interventions, N features)
         fitted_data_transform = self.fit_results['fitted_data_transform']
