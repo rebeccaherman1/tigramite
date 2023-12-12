@@ -423,7 +423,7 @@ class Models():
                 T = [T]
             if inverse:
                 for t in T[::-1]:
-                    data = T.inverse_transform(X=data)
+                    data = t.inverse_transform(X=data)
             else: 
                 for t in T:
                     data = t.transform(X=data)
