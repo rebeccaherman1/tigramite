@@ -110,9 +110,13 @@ class Models():
     def _from_sklearn(self, A):
         return A.T
     
-    #sklearn operates with (n_samples, n_features)
+    #tigramite operates with (n_features, time)
     def _select_tig(self, A, loc_indices):
         return A[loc_indices,:]
+    
+    #sklearn operates with (n_samples, n_features)
+    def _select_sklearn(self, A, loc_indices):
+        return A[:,loc_indices]
 
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
@@ -412,11 +416,9 @@ class Models():
             #somewhat redundant with opening logic in data_processing. TODO SINGLE SOURCE OF TRUTH!!!
             return {W[i]: [x+np.sum(vector_lengths[:i]) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
         
-        def list_transform(T, I, data, to_sklearn=True, inverse=False)
-            if inverse:
-                to_sklearn=False
-            if to_sklearn:
-                data=self._to_sklearn(data, I)
+        #entire function already in language of sklearn
+        def list_transform(T, data, I=None, inverse=False):
+            data=self._select_sklearn(data, I)
             if not isinstance(T, list):
                 T = [T]
             if inverse:
@@ -424,19 +426,18 @@ class Models():
                     data = T.inverse_transform(X=data)
             else: 
                 for t in T:
-                    data = T.transform(X=data)
-            #stay in sklearn format
+                    data = t.transform(X=data)
             return data
         
-        def macro_transform(fitted_data_transform, N, data, to_sklearn=False, inverse=False):
+        def macro_transform(fitted_data_transform, N, data, inverse=False):
             lengths = get_index_dict(N)
             data_list = []
             for varlag in N:
-                data_list += list_transform(fitted_data_transform[varlag], lengths[var_lag], data, to_sklearn, inverse)
+                data_list += list_transform(fitted_data_transform[varlag], data, I=lengths[var_lag], inverse)
             return np.concatenate(data_list, axis=1)
         
-        def xyz_transform(fitted_data_transform, N, data, to_sklearn=True, inverse=False):
-            return list_transform(fitted_data_transform[N], None, data, to_sklearn=True, inverse=False)
+        def xyz_transform(fitted_data_transform, N, data, inverse=False):
+            return list_transform(fitted_data_transform[N], data, inverse)
             
         # Transform the data if needed -- data passed in. Return as (N interventions, N features)
         fitted_data_transform = self.fit_results['fitted_data_transform']
@@ -609,7 +610,7 @@ class Models():
             dim_z = dim - 2
             # Transform the data if needed
             if self.data_transform is not None:
-                fDTs, array = _fit_transform(self, array):
+                fDTs, array = _fit_transform(self, array)
             # Cache the results
             fit_results[j] = {}
             # Cache the data transform

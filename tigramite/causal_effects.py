@@ -1931,9 +1931,9 @@ class CausalEffects():
         Parameters
         ----------
         intervention_data : numpy array
-            Numpy array of shape (time, len(X)) that contains the do(X) values.
+            Numpy array of shape (N interventions, len(X)) that contains the do(X) values.
         conditions_data : data object, optional
-            Numpy array of shape (time, len(S)) that contains the S=s values.
+            Numpy array of shape (N interventions, len(S)) that contains the S=s values.
         pred_params : dict, optional
             Optional parameters passed on to sklearn prediction function.
         return_further_pred_results : bool, optional (default: False)
