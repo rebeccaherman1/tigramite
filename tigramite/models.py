@@ -433,7 +433,7 @@ class Models():
             lengths = get_index_dict(N)
             data_list = []
             for varlag in N:
-                data_list += list_transform(fitted_data_transform[varlag], data, I=lengths[var_lag], inverse)
+                data_list += list_transform(fitted_data_transform[varlag], data, I=lengths[var_lag], inverse=inverse)
             return np.concatenate(data_list, axis=1)
         
         def xyz_transform(fitted_data_transform, N, data, inverse=False):
