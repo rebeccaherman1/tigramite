@@ -84,7 +84,6 @@ class Models():
             self.data_transform = data_transform
         else:
             self.data_transform = [data_transform]
-        self.transform_macro = transform_macro
         self.verbosity = verbosity
         # Initialize the object that will be set later
         self.all_parents = None
@@ -98,7 +97,7 @@ class Models():
     
     #finds rows in `array` that correspond to the ith macro (var, lag). 
     def _get_macro_node(self, macro_nodes, i):
-        return list(np.where(macro_nodes==i))
+        return list(np.where(macro_nodes==i)[0]) #TODO single-source-of-truth this 0!
 
     #selects appropriate indices and transposes to be in the correct orientation for sklearn.
     def _to_sklearn(self, A, loc_indices=None):
@@ -283,10 +282,10 @@ class Models():
                 array_list = []
                 xyz_list = []
                 for w in node_dict.keys():
-                    varlag = node_dict[w][0]
+                    varlag = node_dict[w][0] #TODO abstract this detail away. also maybe just remove lengths -- do I use them ever?
                     self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, w)
                     array_list += [p_array]
-                    xyz_list += [transformed_translator[varlag]]*p_array.size[0] #elements are rows
+                    xyz_list += [transformed_translator[varlag]]*p_array.shape[0] #elements are rows
                 array = np.concatenate(array_list) #in language of tigramite
                 #update xyz, should update what is used in the helper function as well.
                 xyz = np.array(xyz_list)
@@ -412,11 +411,11 @@ class Models():
         if pred_params is None:
             pred_params = {}
 
-        def get_index_dict(W, vector_lengths):
+        def get_index_dict(W):
             #somewhat redundant with but a bit different (no sum) from get_vectorized_length above
             vector_lengths = [len(self.dataframe.vector_vars[w[0]]) for w in W]
             #somewhat redundant with opening logic in data_processing. TODO SINGLE SOURCE OF TRUTH!!!
-            return {W[i]: [x+np.sum(vector_lengths[:i]) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
+            return {W[i]: [int(x+np.sum(vector_lengths[:i])) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
         
         #entire function already in language of sklearn
         def list_transform(T, data, I=None, inverse=False):
@@ -435,7 +434,7 @@ class Models():
             lengths = get_index_dict(N)
             data_list = []
             for varlag in N:
-                data_list += list_transform(fitted_data_transform[varlag], data, I=lengths[var_lag], inverse=inverse)
+                data_list += [list_transform(fitted_data_transform[varlag], data, I=lengths[varlag], inverse=inverse)]
             return np.concatenate(data_list, axis=1)
         
         def xyz_transform(fitted_data_transform, N, data, inverse=False):
