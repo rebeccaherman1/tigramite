@@ -641,7 +641,7 @@ class DataFrame():
         return_macro_nodes : bool, optional (default: False, recommend True with vectorized dataframes)
             Whether to return MACRO_NODES, which identifies which macro (var, lag) each 
             element in the ARRAY came from with a unique int, and NODE_DICT, which translates
-            the int into the macro (var, lag) pair and gives the length of the vector.
+            the int into the macro (var, lag) pair.
         return_cleaned_xyz : bool, optional (default: False)
             Whether to return cleaned X,Y,Z, where possible duplicates are
             removed.
@@ -719,7 +719,7 @@ class DataFrame():
             outputs the macro_nodes array and node_dict, which together provide
             the macro-information that would otherwise be lost during the creation
             of the array from a vectorized dataset. Node dict defines macro 
-            node-and-lag indices in terms of their (var, lag) tuple and their length,
+            node-and-lag indices in terms of their (var, lag) tuple,
             while macro_nodes identifies which macro node-and-lag provided each entry 
             in the returned 'array'.
         """
@@ -740,10 +740,11 @@ class DataFrame():
         #assume no overlap here -- should be checked before arguments are passed in.
         all_nodes = X+Y+Z+extraZ
         #macro-nodes may appear multiple times in all_nodes at different lags. So we define new macro indeces, and the following
-        #dict maps these indices to the macro tuple (var, lag) and the length of this node.
-        node_dict = {i: (all_nodes[i], self.vector_lengths[all_nodes[i][0]]) for i in range(len(all_nodes))}
+        #dict maps these indices to the macro tuple (var, lag).
+        node_dict = {i: all_nodes[i] for i in range(len(all_nodes))}
         #array like xyz which shows which macro (var, lag) pair the microvariables in OBSERVATION_ARRAY come from.
-        macro_nodes = np.array([k for k in node_dict.keys() for i in range(node_dict[k][1])])
+        #node_dict[k][0] retrieves just the node index to use for vector_lengths
+        macro_nodes = np.array([k for k in node_dict.keys() for i in range(self.vector_lengths[node_dict[k][0]])])
             
         # If vector-valued variables exist, add them
         def vectorize(varlag):     

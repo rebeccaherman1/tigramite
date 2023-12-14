@@ -261,8 +261,8 @@ class Models():
             #original functionality. assumes that transforms work element-wise (does not hold for PCA)
             if not self.transform_macro:
                 transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
-                # Fit only X, Y, and S for later use in transforming input
-                #TODO why do we need a separate transform for S=Z=conditions and not for extra_Z?
+                # Fit only X, Y, and S for later use in transforming input. 
+                #S may be prescribed, and thus the transform should be saved, while Z is determined internally.
                 if len(self.conditions) == 0:
                     sep_transforms = ['x', 'y']
                 else:
@@ -293,7 +293,7 @@ class Models():
                 array_list = []
                 xyz_list = []
                 for w in node_dict.keys():
-                    varlag = node_dict[w][0] #TODO abstract this detail away. also maybe just remove lengths -- do I use them ever?
+                    varlag = node_dict[w]
                     self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, w)
                     array_list += [p_array]
                     xyz_list += [transformed_translator[varlag]]*p_array.shape[0] #elements are rows
