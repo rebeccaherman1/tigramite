@@ -328,9 +328,7 @@ class DataFrame():
             if svl != micro_N:
                 raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, micro_N))
             #TODO: write tests to fully test this new functionality
-            vector_vars = {
-                i: [(x+np.sum(vector_lengths[:i]),0) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))
-            }
+            vector_vars = self.make_vector_node_dict(vector_lengths)
         
         # Setup dictionary of variables for vector mode
         self.vector_vars = vector_vars
@@ -413,6 +411,15 @@ class DataFrame():
                            'y' : 1,
                            'z' : 2,
                            'e' : 3}
+        
+    def make_vector_node_dict(self, vector_lengths, include_lag=True, key_func=None):
+        if key_func is None:
+            key_func = lambda x: x
+        d = {key_func(i): [int(x+np.sum(vector_lengths[:i])) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
+        if include_lag:
+            return {k: [(e,0) for e in d[k]] for k in d.keys()}
+        else:
+            return d
 
     def get_index_code(self, n):
         return self.index_code[n]
@@ -812,7 +819,7 @@ class DataFrame():
             raise ValueError("max_lag must be in {'2xtau_max', 'tau_max', 'max_lag', "\
                 "'max_lag_or_tau_max', '2xtau_max_future'}")
             
-        #TODO make this an accessible function
+        #TODO make this an accessible function, potentially to use instead of TRANSFORMED_TRANSLATOR in models.py
         xyz = np.array([self.get_index_code(name)
                         for var, name in zip([X, Y, Z, extraZ], ['x', 'y', 'z', 'e'])
                         for _ in var])

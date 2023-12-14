@@ -91,13 +91,15 @@ class Models():
         self.tau_max = None
         self.fit_results = None
         
+    def _where(self, A, B):
+        return list(np.where(A==B)[0])
     #finds rows in `array` that correspond to xyz
     def _get_indices(self, xyz, n):
-        return list(np.where(xyz==self.dataframe.get_index_code(n))[0])
+        return self._where(xyz, self.dataframe.get_index_code(n))
     
     #finds rows in `array` that correspond to the ith macro (var, lag). 
     def _get_macro_node(self, macro_nodes, i):
-        return list(np.where(macro_nodes==i)[0]) #TODO single-source-of-truth this 0!
+        return self._where(macro_nodes,i)
 
     #selects appropriate indices and transposes to be in the correct orientation for sklearn.
     def _to_sklearn(self, A, loc_indices=None):
@@ -155,6 +157,9 @@ class Models():
     def _fit_macro_transform(self, array, macro_nodes, i):
         loc_indices = self._get_macro_node(macro_nodes, i)
         return self._fit_transform(array, loc_indices)
+    
+    def get_vectorized_lengths(self, W):
+        return [self.dataframe.vector_lengths[w[0]] for w in W]
 
     # @profile    
     def get_general_fitted_model(self, 
@@ -198,7 +203,7 @@ class Models():
         """
 
         def get_vectorized_length(W):
-            return sum([len(self.dataframe.vector_vars[w[0]]) for w in W])
+            return sum(self.get_vectorized_lengths(W))
         
         self.X = X 
         self.Y = Y
@@ -310,8 +315,7 @@ class Models():
         for n in ['x', 'e', 'z']:
             predictor_indices += self._get_indices(xyz, n)
         
-        #TODO maybe this doesn't need to be transposed again?!?!
-        #Is OBSERVATION_ARRAY not consistent in terms of orientation?
+        #the following arrays in the language of sklearn
         predictor_array = self._to_sklearn(array, predictor_indices)
         target_array = self._to_sklearn(array, self._get_indices(xyz, 'y'))
 
@@ -423,10 +427,8 @@ class Models():
             pred_params = {}
 
         def get_index_dict(W):
-            #somewhat redundant with but a bit different (no sum) from get_vectorized_length above
-            vector_lengths = [len(self.dataframe.vector_vars[w[0]]) for w in W]
-            #somewhat redundant with opening logic in data_processing. TODO SINGLE SOURCE OF TRUTH!!!
-            return {W[i]: [int(x+np.sum(vector_lengths[:i])) for x in range(vector_lengths[i])] for i in range(len(vector_lengths))}
+            key_func = lambda x: W[x]
+            return self.dataframe.make_vector_node_dict(self.get_vectorized_lengths(W), include_lag=False, key_func = key_func)
         
         #entire function already in language of sklearn
         def list_transform(T, data, I=None, inverse=False):
