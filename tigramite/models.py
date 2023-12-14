@@ -284,6 +284,7 @@ class Models():
                 #used to construct new xyz array
                 transformed_translator = {}
                 #this must be in the same order as done in data_processing construct_array
+                #TODO make single-source-of-truth in data_processing?
                 N_lst = [self.X,self.Y,self.conditions,self.Z]
                 # intervention:       X, self.X, 'x'
                 # target:             Y, self.Y, 'y'

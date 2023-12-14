@@ -189,7 +189,7 @@ class DataFrame():
         else:
             raise ValueError("'analysis_mode' is '{}', must be 'single' or "\
                 "'multiple'.".format(analysis_mode))
-
+            
         # Check for correct type and format of 'data', internally cast to the
         # analysis mode 'multiple' case in dictionary representation
         if self.analysis_mode == 'single':
@@ -314,7 +314,23 @@ class DataFrame():
             self.Ndata = _dataset_data_shape[1] # (Number of variables) 
             # N does not vary across the datasets
 
-        self.vectorized = (vector_lengths is not None) or (vector_vars is not None)    
+        self.vectorized = (vector_lengths is not None) or (vector_vars is not None)  
+        
+        if vector_vars is not None:
+            if vector_lengths is not None:
+                msg = "Overwriting vector_lengths"
+                warnings.warn(msg)
+            else:
+                n_features = self.values[0].shape[0]
+                v_lst = [e[0] for _, v in vector_vars.items() for e in v]
+                sl = len(set(v_lst))
+                vl = len(v_lst)
+                if sl<vl:
+                    msg = "Some data features appear in multiple macro-nodes! There are {} duplicates of micro-features in the macro-dataframe ({}-{})"
+                    warnings.warn(msg.format(vl-sl, vl, sl))
+                if sl<n_features:
+                    msg = "{} data features are not included in any macro-nodes!"
+                    warnings.warn(msg.format(n_features-sl))
         
         #automatic creation of vector_vars from vector_lengths
         if vector_lengths is not None:
@@ -327,7 +343,6 @@ class DataFrame():
             micro_N = _data_shape[-1]
             if svl != micro_N:
                 raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, micro_N))
-            #TODO: write tests to fully test this new functionality
             vector_vars = self.make_vector_node_dict(vector_lengths)
         
         # Setup dictionary of variables for vector mode
@@ -343,7 +358,6 @@ class DataFrame():
         if self.vector_lengths is None:
             self.vector_lengths = np.array([len(self.vector_vars[k]) for k in self.vector_vars.keys()])
         
-        # TODO: check vector_vars! throw warning if vector_vars overlap or don't cover the full space of the dataset.
         self.N = len(self.vector_vars)
         
         # Warnings
@@ -615,7 +629,7 @@ class DataFrame():
                         return_macro_nodes=False,
                         return_cleaned_xyz=False,
                         do_checks=True,
-                        remove_overlaps=True,
+                        remove_overlaps=False,#changed default behavior
                         cut_off='2xtau_max',
                         verbosity=0):
         """Constructs array from variables X, Y, Z from data.
@@ -767,24 +781,25 @@ class DataFrame():
         extraZ = vectorize(extraZ) 
 
         if remove_overlaps:
-            # Remove duplicates in X, Y, Z, extraZ
-            #Changed so we only do this when remove_overlaps=True
-            X = list(OrderedDict.fromkeys(X))
-            Y = list(OrderedDict.fromkeys(Y))
-            Z = list(OrderedDict.fromkeys(Z))
-            extraZ = list(OrderedDict.fromkeys(extraZ))
-            # If a node in Z occurs already in X or Y, remove it from Z
-            #TODO: if we ask to condition on a node, shouldn't we actually remove it from Y?
-            #Couldn't there theoretically also be overlaps between X and Y?
-            Z = [node for node in Z if (node not in X) and (node not in Y)]
-            extraZ = [node for node in extraZ if (node not in X) and (node not in Y) and (node not in Z)]
+            if self.vectorized:
+                msg = "Cannot remove overlaps for vectorized data. remove_overlaps=True ignored."
+                #Of course, this may also be the only time when removing overlaps is relevant...
+                Warnings.warn(msg)
+            else:
+                # Remove duplicates in X, Y, Z, extraZ
+                #Changed so we only do this when remove_overlaps=True
+                X = list(OrderedDict.fromkeys(X))
+                Y = list(OrderedDict.fromkeys(Y))
+                Z = list(OrderedDict.fromkeys(Z))
+                extraZ = list(OrderedDict.fromkeys(extraZ))
+                # If a node in Z occurs already in X or Y, remove it from Z
+                #TODO: if we ask to condition on a node, shouldn't we actually remove it from Y?
+                #Couldn't there theoretically also be overlaps between X and Y?
+                Z = [node for node in Z if (node not in X) and (node not in Y)]
+                extraZ = [node for node in extraZ if (node not in X) and (node not in Y) and (node not in Z)]
 
         XYZ = X + Y + Z + extraZ
         dim = len(XYZ)
-        #MACRO_NODES SHOULD correspond to XYZ if no duplicates were found and removed.
-        if dim != len(macro_nodes):
-            raise ValueError("overlaps removed; must find some way to update MACRO_NODES")
-            #TODO implement this...
 
         # Check that all lags are non-positive and indices are in [0,N-1]
         if do_checks:
