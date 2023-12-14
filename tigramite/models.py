@@ -118,6 +118,13 @@ class Models():
         if loc_indices:
             A = A[:,loc_indices]
         return A
+    
+    def _get_scale_sklearn(self, T, A):
+        #artifically inflate the stored variance of macro-nodes with 
+        #multiple features so it will be further scaled down.
+        #original in sklearn is np.sqrt(var)
+        #so we want *np.sqrt(num features)
+        return T.scale_*np.sqrt(A.shape[1])
 
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
@@ -128,7 +135,11 @@ class Models():
         fDFs = []
         for df in self.data_transform:
             loc_transform = deepcopy(df)
-            loc_array = self._from_sklearn(loc_transform.fit_transform(loc_array)) 
+            loc_transform.fit(loc_array)
+            if self.transform_macro and (loc_transform.__class__ == sklearn.preprocessing._data.StandardScaler):
+                #scale total variance instead of feature variance to 1
+                loc_transform.scale_ = self._get_scale_sklearn(loc_transform, loc_array)
+            loc_array = self._from_sklearn(loc_transform.transform(loc_array)) 
             fDFs += [loc_transform]
         #if it is a single element list, store just the element with no list in fitted data transforms.
         if len(fDFs)==1:
