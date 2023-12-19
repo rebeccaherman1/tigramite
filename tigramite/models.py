@@ -1,5 +1,6 @@
 
 """Tigramite causal inference for time series."""
+#TODO check all instances of construct_array and make sure the duplicates and vectorized logic is consistent.
 
 # Author: Jakob Runge <jakob@jakob-runge.com>
 #
@@ -14,6 +15,7 @@ import sklearn.linear_model
 import networkx
 from tigramite.data_processing import DataFrame
 from tigramite.pcmci import PCMCI
+from collections import defaultdict, OrderedDict
 
 class Models():
     """Base class for time series models.
@@ -37,13 +39,13 @@ class Models():
     conditional_model : sklearn model object, optional (default: None)
         Used to fit conditional causal effects in nested regression. 
         If None, model is used.
-    data_transform : (list of) sklearn preprocessing object(s), optional (default: None)
+    data_transform : sklearn preprocessing or decomposition object, optional (default: None)
         Used to transform data prior to fitting. For example,
-        sklearn.preprocessing.StandardScaler for simple standardization. The
-        fitted parameters are stored. Note that the inverse_transform is then
+        sklearn.preprocessing.StandardScaler for simple standardization. 
+        sklearn.pipeline.Pipeline can be used for sequential transformations. 
+        The fitted parameters are stored. Note that the inverse_transform is then
         applied to the predicted data
-        A list of transforms can be accomodated when transform_macro is True.
-    transform_macro : boolean, optional (default: dataframe.vectorized)
+    transform_by_vector : boolean, optional (default: dataframe.has_vector_data)
         Determines whether the data_transform should be applied to the data matrix
         as a whole, or should be applied to macro-nodes individually. Recommended
         for vectorized dataframes; defaults to whether the dataframe is vectorized.
@@ -60,13 +62,13 @@ class Models():
                  model,
                  conditional_model=None,
                  data_transform=None,
-                 transform_macro=None,
+                 transform_by_vector=None,
                  mask_type=None,
                  verbosity=0):
-        if transform_macro is None:
-            self.transform_macro = dataframe.vectorized
+        if transform_by_vector is None:
+            self.transform_by_vector = dataframe.has_vector_data
         else:
-            self.transform_macro = transform_macro
+            self.transform_by_vector = transform_by_vector
         # Set the mask type and dataframe object
         self.mask_type = mask_type
         self.dataframe = dataframe
@@ -80,10 +82,7 @@ class Models():
         else:
             self.conditional_model = conditional_model
         # Set the data_transform object and verbosity
-        if (data_transform is None) or isinstance(data_transform, list):
-            self.data_transform = data_transform
-        else:
-            self.data_transform = [data_transform]
+        self.data_transform = data_transform
         self.verbosity = verbosity
         # Initialize the object that will be set later
         self.all_parents = None
@@ -96,10 +95,13 @@ class Models():
     #finds rows in `array` that correspond to xyz
     def _get_indices(self, xyz, n):
         return self._where(xyz, self.dataframe.get_index_code(n))
-    
+        
     #finds rows in `array` that correspond to the ith macro (var, lag). 
     def _get_macro_node(self, macro_nodes, i):
         return self._where(macro_nodes,i)
+    
+    def _get_xyz_from_macro_node(self, macro_nodes, xyz, i):
+        return xyz[self._get_macro_node(macro_nodes, i)[0]]
 
     #selects appropriate indices and transposes to be in the correct orientation for sklearn.
     def _to_sklearn(self, A, loc_indices=None):
@@ -128,25 +130,20 @@ class Models():
         #so we want *np.sqrt(num features)
         return T.scale_*np.sqrt(A.shape[1])
 
+    #TODO remove this logic and make a custom Scaler instead.
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
     #can accomodate a list of transforms in the order of intended application. In this case, 
     #it will return a tuple with a list of fitted transforms and then the transformed data.
     def _fit_transform(self, array, loc_indices=None):
         loc_array = self._to_sklearn(array, loc_indices)
-        fDFs = []
-        for df in self.data_transform:
-            loc_transform = deepcopy(df)
-            loc_transform.fit(loc_array)
-            if self.transform_macro and (loc_transform.__class__ == sklearn.preprocessing._data.StandardScaler):
-                #scale total variance instead of feature variance to 1
-                loc_transform.scale_ = self._get_scale_sklearn(loc_transform, loc_array)
-            loc_array = self._from_sklearn(loc_transform.transform(loc_array)) 
-            fDFs += [loc_transform]
-        #if it is a single element list, store just the element with no list in fitted data transforms.
-        if len(fDFs)==1:
-            fDFs = fDFs[0]
-        return (fDFs, loc_array)
+        loc_transform = deepcopy(self.data_transform)
+        loc_transform.fit(loc_array)
+        if self.transform_by_vector and (loc_transform.__class__ == sklearn.preprocessing._data.StandardScaler):
+            #scale total variance instead of feature variance to 1
+            loc_transform.scale_ = self._get_scale_sklearn(loc_transform, loc_array)
+        loc_array = self._from_sklearn(loc_transform.transform(loc_array)) 
+        return (loc_transform, loc_array)
 
     #transforms data divided by XYZ. Returns only the fitted transform.
     def _fit_xyz_transform(self, array, xyz, n):
@@ -163,8 +160,8 @@ class Models():
 
     # @profile    
     def get_general_fitted_model(self, 
-                Y, X, Z=None,
-                conditions=None,
+                Y, X, Z=None,    #models.Z = adjustment set. May have overlaps with X and Y.
+                conditions=None, #models.conditions = causal_effects.S = user-defined conditions
                 tau_max=None,
                 cut_off='max_lag_or_tau_max',
                 empty_predictors_function=np.mean,
@@ -205,27 +202,35 @@ class Models():
         def get_vectorized_length(W):
             return sum(self.get_vectorized_lengths(W))
         
-        self.X = X 
-        self.Y = Y
-
-        if conditions is None:
-            conditions = []
-        self.conditions = conditions
+        def warn_duplicates_overlaps(R, X, n, msg):
+            if n is not None:
+                if len(R)<len(X):
+                    Warnings.warn(msg.format(n))
         
-        #remove macro-duplicates here
-        #remove nodes from Z if they are also in conditions or X
-        if Z is not None:
-            Z = [z for z in Z if z not in conditions+self.X]
-            nnZ = Z
-        else:
-            nnZ = []
-
-        self.Z = Z
-        #remove nodes from Y if they are also in X or Z (should not appear in conditions) 
-        self.Y = [y for y in self.Y if y not in self.X+nnZ]
-
-        # lenX = len(self.X)
-        # lenS = len(self.conditions)
+        def remove_duplicates(X, n=None):
+            R = list(OrderedDict.fromkeys(X))
+            warn_duplicates_overlaps(R, X, n, "Removing macro-level duplicates from {}")
+            return R
+        
+        #O, a list of nodes; i.e. X+extraZ
+        def remove_overlaps(X, O, n=None):
+            R = [node for node in X if (node not in O)]
+            warn_duplicates_overlaps(R, X, n, "Removing macro-level overlaps from {}")
+            return R
+        
+        def remove_duplicates_and_overlaps(X, O, n=None):
+            if X is None:
+                return []
+            else:
+                return remove_overlaps(remove_duplicates(X, n), O, n)
+        
+        #remove macro-duplicates and overlaps here
+        self.X = remove_duplicates(X, 'X')
+        self.Y = remove_duplicates(Y, 'Y')
+        self.conditions = remove_duplicates_and_overlaps(conditions, self.X+self.Y, 'user-defined conditions')
+        self.Z = remove_duplicates_and_overlaps(Z, self.conditions+self.X+self.Y) 
+        #prefer to keep condition over adjustment set because user might want to pass in a specific value for the condition.
+        
         self.lenX = get_vectorized_length(self.X)
         self.lenS = get_vectorized_length(self.conditions)
 
@@ -254,7 +259,8 @@ class Models():
                                            tau_max=self.tau_max,
                                            mask_type=self.mask_type,
                                            cut_off=self.cut_off,
-                                           remove_overlaps=False, #changed!
+                                           remove_overlaps = False,
+                                           remove_duplicates = not self.transform_by_vector,
                                            verbosity=self.verbosity,
                                            return_macro_nodes=True)
                                             
@@ -264,7 +270,7 @@ class Models():
             self.fitted_data_transform = {}
             
             #original functionality. assumes that transforms work element-wise (does not hold for PCA)
-            if not self.transform_macro:
+            if not self.transform_by_vector:
                 transform_names = {'x': 'X', 'y': 'Y', 'z': 'S'}
                 # Fit only X, Y, and S for later use in transforming input. 
                 #S may be prescribed, and thus the transform should be saved, while Z is determined internally.
@@ -281,28 +287,19 @@ class Models():
             #store the transforms by macro (var, lag), and make a new xyz array. 
             #Can access X transforms later by looking at self.X
             else:
-                #used to construct new xyz array
-                transformed_translator = {}
-                #this must be in the same order as done in data_processing construct_array
-                #TODO make single-source-of-truth in data_processing?
-                N_lst = [self.X,self.Y,self.conditions,self.Z]
-                # intervention:       X, self.X, 'x'
-                # target:             Y, self.Y, 'y'
-                # imposed conditions: Z, self.conditions, 'z', self.lenS
-                # adjustment set:     extraZ, self.Z, 'e'
-                n_lst = ['x', 'y', 'z', 'e']
-                for i in range(len(N_lst)):
-                    N = N_lst[i]
-                    for varlag in N:
-                        transformed_translator[varlag] = self.dataframe.get_index_code(n_lst[i]) 
-                        
+                #node_group_translator = {
+                #    'x': self.X, 
+                #    'y': self.Y, 
+                #    'z': self.conditions, #imposed conditions, aka S
+                #    'e': self.Z           #adjustment set,     aka extraZ
+                #}
                 array_list = []
                 xyz_list = []
-                for w in node_dict.keys():
-                    varlag = node_dict[w]
-                    self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, w)
+                for i in node_dict.keys(): #doesn't need to be in the same order as otherwise xyz
+                    varlag = node_dict[i]
+                    self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, i)
                     array_list += [p_array]
-                    xyz_list += [transformed_translator[varlag]]*p_array.shape[0] #elements are rows
+                    xyz_list += [self._get_xyz_from_macro_node(macro_nodes, xyz, i)]*p_array.shape[0] #elements are rows
                 array = np.concatenate(array_list) #in language of tigramite
                 #update xyz, should update what is used in the helper function as well.
                 xyz = np.array(xyz_list)
@@ -401,18 +398,18 @@ class Models():
                         a_name, a, b_name, dataframe_type, b)
                 )
                 
-        TlenX = _calc_transformed_length('x')
-        TlenS = _calc_transformed_length('z')
+        Transformed_lenX = _calc_transformed_length('x')
+        Transformed_lenS = _calc_transformed_length('z')
 
         if transform_interventions_and_prediction:
             _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
         else:
-            _check_error(intervention_data.shape[1], TlenX, "intervention_data.shape[1]", 'X', 'transformed')
+            _check_error(intervention_data.shape[1], Transformed_lenX, "intervention_data.shape[1]", 'X', 'transformed')
         if conditions_data is not None:
             if transform_interventions_and_prediction:
                 _check_error(conditions_data.shape[1], self.lenS, "conditions_data.shape[1]", 'S', "original")
             else:
-                _check_error(conditions_data.shape[1], TlenS, "conditions_data.shape[1]", 'S', 'transformed')
+                _check_error(conditions_data.shape[1], Transformed_lenS, "conditions_data.shape[1]", 'S', 'transformed')
             if conditions_data.shape[0] != intervention_data.shape[0]:
                 raise ValueError("conditions_data.shape[0] must match intervention_data.shape[0].")
 
@@ -434,16 +431,13 @@ class Models():
         #entire function already in language of sklearn
         def list_transform(T, data, I=None, inverse=False):
             data=self._select_sklearn(data, I)
-            if not isinstance(T, list):
-                T = [T]
             if inverse:
-                for t in T[::-1]:
-                    data = t.inverse_transform(X=data)
+                data = T.inverse_transform(X=data)
             else: 
-                for t in T:
-                    data = t.transform(X=data)
+                data = T.transform(X=data)
             return data
         
+        #N is num macro-nodes; rename everywhere
         def macro_transform(fitted_data_transform, N, data, inverse=False):
             lengths = get_index_dict(N)
             data_list = []
@@ -457,7 +451,7 @@ class Models():
         # Transform the data if needed -- data passed in. Return as (N interventions, N features)
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
-            if not self.transform_macro:
+            if not self.transform_by_vector:
                 #still in language of tigramite (unsure about original)
                 intervention_data = xyz_transform(fitted_data_transform, 'X', intervention_data)
                 if self.conditions is not None and conditions_data is not None:
@@ -484,11 +478,10 @@ class Models():
         # Now iterate through interventions (and potentially S)
         # enumerate will iterate through ROWs -- ok when (N interventions, N features)
         for index, dox_vals in enumerate(intervention_data):
-            # Construct XZS-array
-            #TODO why is this reshape necessary?
-            intervention_array = dox_vals.reshape(1, TlenX) * np.ones((Tobs, TlenX))
+            # Construct XZS-array. rehape makes size a lenth-2 tuple rather than length-1.
+            intervention_array = dox_vals.reshape(1, Transformed_lenX) * np.ones((Tobs, Transformed_lenX))
             if self.conditions is not None and conditions_data is not None:
-                conditions_array = conditions_data[index].reshape(1, TlenS) * np.ones((Tobs, TlenS))  
+                conditions_array = conditions_data[index].reshape(1, Transformed_lenS) * np.ones((Tobs, Transformed_lenS))  
                 predictor_array = np.hstack((intervention_array, z_array, conditions_array))
             else:
                 predictor_array = np.hstack((intervention_array, z_array))
@@ -512,7 +505,7 @@ class Models():
                     X=conditions_array, **pred_params)
 
             if transform_interventions_and_prediction and fitted_data_transform is not None:
-                if not self.transform_macro:
+                if not self.transform_by_vector:
                     predicted_vals = xyz_transform(fitted_data_transform, 'Y', 
                                                    predicted_vals, inverse=True).squeeze()
                     #fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
@@ -618,18 +611,19 @@ class Models():
                                                tau_max=self.tau_max,
                                                mask_type=self.mask_type,
                                                cut_off=cut_off,
-                                               remove_overlaps=True,
+                                               remove_overlaps=False,
+                                               remove_duplicates = not self.transform_by_vector,
                                                verbosity=self.verbosity)
             # Get the dimensions out of the constructed array
             dim, T = array.shape
             dim_z = dim - 2
             # Transform the data if needed
             if self.data_transform is not None:
-                fDTs, array = _fit_transform(self, array)
+                fDT, array = _fit_transform(self, array)
             # Cache the results
             fit_results[j] = {}
             # Cache the data transform
-            fit_results[j]['data_transform'] = fDTs #deepcopy(self.data_transform)
+            fit_results[j]['data_transform'] = fDT #deepcopy(self.data_transform)
 
             if return_data:
                 # Cache the data if needed
@@ -756,7 +750,8 @@ class Models():
                                                          mask=new_data_mask,
                                                          mask_type=self.mask_type,
                                                          cut_off=cut_off,
-                                                         remove_overlaps=True,
+                                                         remove_overlaps=False,
+                                                         remove_duplicates = not self.transform_by_vector,
                                                          verbosity=self.verbosity)
             # Otherwise use the default values
             else:
@@ -765,7 +760,8 @@ class Models():
                                                    tau_max=self.tau_max,
                                                    mask_type=self.mask_type,
                                                    cut_off=cut_off,
-                                                   remove_overlaps=True,
+                                                   remove_overlaps=False,
+                                                   remove_duplicates = not self.transform_by_vector,
                                                    verbosity=self.verbosity)
             # Transform the data if needed
             a_transform = self.fit_results[target]['data_transform']
@@ -2173,7 +2169,8 @@ class Prediction(Models, PCMCI):
                                                          mask=new_data_mask,
                                                          mask_type=self.mask_type,
                                                          cut_off=cut_off,
-                                                         remove_overlaps=True,
+                                                         remove_overlaps=False,
+                                                         remove_duplicates = not self.transform_by_vector,
                                                          verbosity=self.verbosity)
             # Otherwise use the default values
             else:
@@ -2183,7 +2180,8 @@ class Prediction(Models, PCMCI):
                                                    mask=self.test_mask,
                                                    mask_type=self.mask_type,
                                                    cut_off=cut_off,
-                                                   remove_overlaps=True,
+                                                   remove_overlaps=False,
+                                                   remove_duplicates = not self.transform_by_vector,
                                                    verbosity=self.verbosity)
             # Transform the data if needed
             a_transform = self.fitted_model[target]['data_transform']

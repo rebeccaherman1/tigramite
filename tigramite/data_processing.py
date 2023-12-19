@@ -16,6 +16,11 @@ import scipy.sparse.linalg
 from scipy import stats
 from numba import jit
 
+index_codes = {'x' : 0,
+               'y' : 1,
+               'z' : 2,
+               'e' : 3}
+
 class DataFrame():
     """Data object containing single or multiple time series arrays and optional 
     mask, as well as variable definitions.
@@ -49,7 +54,7 @@ class DataFrame():
         2*tau_max (more precisely, this depends on the cut_off argument in
         self.construct_array(), see further below). This avoids biases, see
         section on masking in Supplement of Runge et al. SciAdv (2019).
-    vector_vars : dict
+    vector_vars : dict or integer list
         Dictionary of vector variables of the form,
         Eg. {0: [(0, 0), (1, 0)], 1: [(2, 0)], 2: [(3, 0)], 3: [(4, 0)]}
         The keys are the new vectorized variables and respective tuple values
@@ -57,10 +62,9 @@ class DataFrame():
         construct_array(), the individual components are parsed from vector_vars
         and added (accounting for lags) to the list that creates X, Y and Z for
         conditional independence test.
-    vector_lengths : array
-        Alternative to vector_vars -- will overwrite vector_vars if both are passed in
-        Array of lengths of vectors for automatic creation of vector_vars, assuming 
-        vectors do not overlap, appear in order in the dataframe, and use only lag=0
+        OR
+        List of integer vector-lengths for automatic creation of vector_vars. 
+        assumes vectors do not overlap, appear in order in the dataframe, and use only lag=0
     var_names : list of strings, optional (default: range(N))
         Names of variables, must match the number of variables. If None is
         passed, variables are enumerated as [0, 1, ...]
@@ -127,24 +131,23 @@ class DataFrame():
             Is var_names
         If var_names is None:
             Is {i: i for i in range(self.N)}
-    #TODO jakob -- check this and the next? Why was this not included to begin with?
     self.vector_vars:
-        If vector_lengths is not None:
-            created internally so all elements of each vector are at lag 0, 
-            and vectors cover all data without overlapping
-        Else if vector_vars is not None:
-            Is vector_vars
-        Else:
+        If vector_vars is None:
             Is {i: (i, 0) for i in range(self.N)}
+        else if vector_vars is a dictionary:
+            Is vector_vars
+        else if vector_vars is an integer list:
+            dictionary created internally so all elements of each vector are at lag 0, 
+            and vectors cover all data without overlapping
     self.vector_lengths:
-        If vector_lengths is not None:
-            Is vector_lengths
-        Else if vector_vars is not None:
-            contains the length of each vector
-        Else:
+        If vector_vars is an integer list:
+            Is np.array(vector_vars)
+        Else if vector_vars is a dictionary:
+            np.array containing the length of each vector
+        Else if vector_vars is None:
             an array of 1s for non-vectorized data
-    self.vectorized:
-        True if vector_vars or vector_lengths is not None, else False
+    self.has_vector_data:
+        True if vector_vars is not None, else False
     self.datatime : dictionary
         Time axis for each of the multiple datasets.
     self.analysis_mode : string
@@ -164,6 +167,8 @@ class DataFrame():
         Number of datasets
     self.N : int
         Number of variables (constant across datasets)
+    self.Ndata : int
+        Number of micro-features
     self.T : dictionary
         Dictionary {key(m): T(m), ...}, where T(m) is the time length of
         datasets m and key(m) its identifier as in self.values
@@ -174,11 +179,9 @@ class DataFrame():
     self.bootstrap : dictionary
         Whether to use bootstrap. Must be a dictionary with keys random_state,
         boot_samples, and boot_blocklength.
-    self.index_code : dictionary
-        Codes used during construct_array for single source of truth later
     """
 
-    def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, vector_lengths=None, var_names=None,
+    def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, var_names=None,
         data_type=None, datatime=None, analysis_mode ='single', reference_points=None,
         time_offsets=None, remove_missing_upto_maxlag=False):
 
@@ -314,49 +317,37 @@ class DataFrame():
             self.Ndata = _dataset_data_shape[1] # (Number of variables) 
             # N does not vary across the datasets
 
-        self.vectorized = (vector_lengths is not None) or (vector_vars is not None)  
+        self.has_vector_data = (vector_vars is not None)  
         
+        # Setup dictionary of variables for vector mode
         if vector_vars is not None:
-            if vector_lengths is not None:
-                msg = "Overwriting vector_lengths"
-                warnings.warn(msg)
-            else:
-                n_features = self.values[0].shape[0]
+            if isinstance(vector_vars, dict):
                 v_lst = [e[0] for _, v in vector_vars.items() for e in v]
                 sl = len(set(v_lst))
                 vl = len(v_lst)
                 if sl<vl:
-                    msg = "Some data features appear in multiple macro-nodes! There are {} duplicates of micro-features in the macro-dataframe ({}-{})"
-                    warnings.warn(msg.format(vl-sl, vl, sl))
-                if sl<n_features:
+                    msg = "Some data features appear in multiple macro-nodes! There are {} duplicates of micro-features in the macro-dataframe"
+                    warnings.warn(msg.format(vl-sl))
+                if sl<self.Ndata:
                     msg = "{} data features are not included in any macro-nodes!"
-                    warnings.warn(msg.format(n_features-sl))
-        
-        #automatic creation of vector_vars from vector_lengths
-        if vector_lengths is not None:
-            if not isinstance(vector_lengths, np.ndarray):
-                raise TypeError("vector_lengths must be an np.array, not type {}".format(type(vector_lengths)))
-            _vl_d = len(vector_lengths.shape)
-            if _vl_d>1:
-                raise TypeError("vector_lengths must be a 1d array, not a {}-d array".format(_vl_d))
-            svl = np.sum(vector_lengths)
-            micro_N = _data_shape[-1]
-            if svl != micro_N:
-                raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, micro_N))
-            vector_vars = self.make_vector_node_dict(vector_lengths)
-        
-        # Setup dictionary of variables for vector mode
-        self.vector_vars = vector_vars
-        if self.vector_vars is None:
+                    warnings.warn(msg.format(self.Ndata-sl))
+                self.vector_vars = vector_vars
+                self.vector_lengths = np.array([len(self.vector_vars[k]) for k in self.vector_vars.keys()])
+            elif isinstance(vector_vars, list):
+                if not all(isinstance(n, int) for n in vector_vars):
+                    t = next(type(x) for x in vector_vars if not isinstance(x, int))
+                    raise TypeError("vector_vars does not accept a list of {}; please input a dictionary or a list of integers.".format(t))
+                svl=sum(vector_vars)
+                if svl!=self.Ndata:
+                    raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, self.Ndata))
+                self.vector_lengths = np.array(vector_vars)
+                self.vector_vars = self.make_vector_node_dict(vector_vars)
+            else:
+                raise TypeError("vector_vars must be a dictionary or an integer list, not type {}".format(type(vector_vars)))
+        else:
             self.vector_vars = dict(zip(range(self.Ndata), [[(i, 0)] 
                                 for i in range(self.Ndata)]))
-            self.has_vector_data = False
-        else:
-            self.has_vector_data = True
-
-        self.vector_lengths = vector_lengths
-        if self.vector_lengths is None:
-            self.vector_lengths = np.array([len(self.vector_vars[k]) for k in self.vector_vars.keys()])
+            self.vector_lengths = np.array([1]*self.Ndata)
         
         self.N = len(self.vector_vars)
         
@@ -421,11 +412,6 @@ class DataFrame():
         # bootstrap random draw can be set here
         self.bootstrap = None
         
-        self.index_code = {'x' : 0,
-                           'y' : 1,
-                           'z' : 2,
-                           'e' : 3}
-        
     def make_vector_node_dict(self, vector_lengths, include_lag=True, key_func=None):
         if key_func is None:
             key_func = lambda x: x
@@ -436,7 +422,7 @@ class DataFrame():
             return d
 
     def get_index_code(self, n):
-        return self.index_code[n]
+        return index_codes[n]
 
     def _check_mask(self, mask, check_data_type=False):
         """Checks that the mask is:
@@ -620,16 +606,18 @@ class DataFrame():
         if len(self.reference_points) == 0:
             raise ValueError("No valid reference point.") 
 
-
-    def construct_array(self, X, Y, Z, tau_max,
-                        extraZ=None,
+    def construct_array(self, X, Y, 
+                        Z, #user-defined conditions in causal effect estimation, potential separating set in causal discovery
+                        tau_max,
+                        extraZ=None, #adjustment set in causal effect estimation, doesn't exist for causal discovery
                         mask=None,
                         mask_type=None,
                         data_type=None,
+                        remove_duplicates=True,
                         return_macro_nodes=False,
                         return_cleaned_xyz=False,
                         do_checks=True,
-                        remove_overlaps=False,#changed default behavior
+                        remove_overlaps=True,
                         cut_off='2xtau_max',
                         verbosity=0):
         """Constructs array from variables X, Y, Z from data.
@@ -659,17 +647,51 @@ class DataFrame():
             individual samples in a variable (or all samples) are continuous 
             or discrete: 0s for continuous variables and 1s for discrete variables.
             If it is set, then it overrides the self.data_type assigned to the dataframe.
-        return_macro_nodes : bool, optional (default: False, recommend True with vectorized dataframes)
-            Whether to return MACRO_NODES, which identifies which macro (var, lag) each 
-            element in the ARRAY came from with a unique int, and NODE_DICT, which translates
-            the int into the macro (var, lag) pair.
         return_cleaned_xyz : bool, optional (default: False)
             Whether to return cleaned X,Y,Z, where possible duplicates are
             removed.
         do_checks : bool, optional (default: True)
             Whether to perform sanity checks on input X,Y,Z
+        remove_duplicates: bool, optional (default: True)
+            Recommended False for effect estimation with vectorized dataframes.
+            When False, prevents removing micro-level duplicates and overlaps from the dataframe -- 
+            a step which destroys macro-logic. 
+        return_macro_nodes : bool, optional (default: False)
+            Whether to return MACRO_NODES, which identifies which macro (var, lag) each element in the 
+            ARRAY came from with a unique int, and NODE_DICT, which translates the int into the macro 
+            (var, lag) pair. These only have meaning when remove_duplicates is False.
         remove_overlaps : bool, optional (default: True)
-            Whether to remove variables from Z/extraZ if they overlap with X or Y.
+            Whether to remove micro-level elements from X and Y if they overlap with Z, for the purpose of causal discovery. -- breaking change
+                        
+            #TODO triple-check this logic with Jakob
+            "Duplicates" refers to repeats within a group X, Y, Z, or extraZ
+            "Overlaps" refers to nodes in more than one group
+                
+            in causal discovery, Z is the attempted separating set, and extraZ doesn't exist
+            in causal effect estimation:
+                dp.Z = models.conditions = causal_effects.S = user-defined conditions
+                dp.extraZ = models.Z = adjustment set
+                
+            macro-level overlaps and duplicates cannot happen in causal discovery:
+                -X and Y are each only one macro-node
+                -Z (attempted separating set) is constructed to avoid X and Y.
+                -extraZ doesn't exist
+            macro-level overlaps and duplicates can happen in effect estimation:
+                -Z may have duplicates and overlaps because of user input. Remove from Z if overlaps with X or Y.
+                -extraZ may also have duplicates or overlap with X or Y by constrution of the separating set. (Is this really possible?)
+            =>may be removed elsewhere (with warnings!); here we only worry about micro-level overlaps and duplicates
+
+            return_macro_nodes: will be true for causal effect estimation.
+            (remove_overlaps, remove_duplicates)
+            causal discovery: (T, T) 
+                -remove duplicates from Z (X and Y have only one macro-node and extraZ doesn't exist, so can't hurt if easier)
+                -remove overlaps from x and y if appear in Z -- breaking change
+            causal effect estimation with transformation: (F, F)
+                -don't remove anything
+            causal effect estimation without transformation: (F, T)
+                -remove micro duplicates from X, Z, extraZ (removing from Y would reduce computation but not accuracy, and could make it hard to interpret later)
+                -remove overlaps from extraz and z if appear in X or other Z
+            
         cut_off : {'2xtau_max', 'tau_max', 'max_lag', 'max_lag_or_tau_max', 2xtau_max_future}
             If cut_off == '2xtau_max':
                 - 2*tau_max samples are cut off at the beginning of the time
@@ -766,7 +788,7 @@ class DataFrame():
         #array like xyz which shows which macro (var, lag) pair the microvariables in OBSERVATION_ARRAY come from.
         #node_dict[k][0] retrieves just the node index to use for vector_lengths
         macro_nodes = np.array([k for k in node_dict.keys() for i in range(self.vector_lengths[node_dict[k][0]])])
-            
+                    
         # If vector-valued variables exist, add them
         def vectorize(varlag):     
             vectorized_var = []
@@ -779,24 +801,41 @@ class DataFrame():
         Y = vectorize(Y) 
         Z = vectorize(Z) 
         extraZ = vectorize(extraZ) 
-
-        if remove_overlaps:
-            if self.vectorized:
-                msg = "Cannot remove overlaps for vectorized data. remove_overlaps=True ignored."
-                #Of course, this may also be the only time when removing overlaps is relevant...
-                Warnings.warn(msg)
-            else:
-                # Remove duplicates in X, Y, Z, extraZ
-                #Changed so we only do this when remove_overlaps=True
-                X = list(OrderedDict.fromkeys(X))
-                Y = list(OrderedDict.fromkeys(Y))
-                Z = list(OrderedDict.fromkeys(Z))
-                extraZ = list(OrderedDict.fromkeys(extraZ))
-                # If a node in Z occurs already in X or Y, remove it from Z
-                #TODO: if we ask to condition on a node, shouldn't we actually remove it from Y?
-                #Couldn't there theoretically also be overlaps between X and Y?
-                Z = [node for node in Z if (node not in X) and (node not in Y)]
-                extraZ = [node for node in extraZ if (node not in X) and (node not in Y) and (node not in Z)]
+        
+        def warn_duplicates_overlaps(R, X, n, msg):
+            if n is not None:
+                if len(R)<len(X):
+                    Warnings.warn(msg.format(n))
+        
+        def remove_duplicates(X, n=None):
+            R = list(OrderedDict.fromkeys(X))
+            warn_duplicates_overlaps(R, X, n, "Removing micro-level duplicates from {}")
+            return R
+        
+        #O, a list of nodes; i.e. X+extraZ
+        def remove_overlaps(X, O, n=None):
+            R = [node for node in X if (node not in O)]
+            warn_duplicates_overlaps(R, X, n, "Removing micro-level overlaps from {}")
+            return R
+        
+        if remove_duplicates: #when a transformation that needs duplicates and overlaps will not be applied
+            #remove micro-level duplicates within each set of nodes
+            #not necessary for Y because it will always be a target, whether causal discovery or effect estimation
+            #TODO if happens for X during effect estimation, then how will we pass in data later?!
+            X = remove_duplicates(X, 'x')
+            Z = remove_duplicates(Z, 'z')
+            extraZ = remove_duplicates(extraZ, 'e')
+            if remove_overlaps: #True for causal discovery
+                #remove micro-level overlaps from X and Y if appear in Z -- TODO breaking change!
+                X = remove_overlaps(X, Z)
+                Y = remove_overlaps(Y, Z)
+            else: #for causal effect estimation
+                #remove micro-level overlaps...
+                #...from adjustment set if appears in user conditions or X (X is prescribed, and Z may be prescribed)
+                extraZ = remove_overlaps(extraZ, X+Z)
+                #...from user conditions if appears in X
+                Z = remove_overlaps(Z, X, 'user-defined conditioning set')
+                #TODO removing Y is a breaking change, but seems good.  
 
         XYZ = X + Y + Z + extraZ
         dim = len(XYZ)
@@ -834,7 +873,7 @@ class DataFrame():
             raise ValueError("max_lag must be in {'2xtau_max', 'tau_max', 'max_lag', "\
                 "'max_lag_or_tau_max', '2xtau_max_future'}")
             
-        #TODO make this an accessible function, potentially to use instead of TRANSFORMED_TRANSLATOR in models.py
+        #TODO make this an accessible function for use in models.py?
         xyz = np.array([self.get_index_code(name)
                         for var, name in zip([X, Y, Z, extraZ], ['x', 'y', 'z', 'e'])
                         for _ in var])
@@ -960,7 +999,7 @@ class DataFrame():
 
                 # Iterate over defined mapping from letter index to number index,
                 # i.e. 'x' -> 0, 'y' -> 1, 'z'-> 2, 'e'-> 3
-                for idx, cde in self.index_code.items():
+                for idx, cde in index_codes.items():
                     # Check if the letter index is in the mask type
                     if (mask_type is not None) and (idx in mask_type):
                         # If so, check if any of the data that correspond to the
@@ -1158,7 +1197,7 @@ def get_block_length(array, xyz, mode):
     # Initiailize the indices
     indices = range(dim)
     if mode == 'significance':
-        indices = np.where(xyz == self.get_index_code('x'))[0]
+        indices = np.where(xyz == index_codes['x'])[0]
 
     # Maximum lag for autocov estimation
     max_lag = int(0.1*T)
