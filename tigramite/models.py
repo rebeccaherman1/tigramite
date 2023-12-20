@@ -43,8 +43,9 @@ class Models():
         Used to transform data prior to fitting. For example,
         sklearn.preprocessing.StandardScaler for simple standardization. 
         sklearn.pipeline.Pipeline can be used for sequential transformations. 
-        The fitted parameters are stored. Note that the inverse_transform is then
-        applied to the predicted data
+        Additional custom sklearn-based preprocessors can be found in custom_preprocessors.py.
+        For vectorized data, tigramite.custom_preprocessors.StandardTotalVarianceScaler is
+        recommended. The fitted parameters are stored. 
     transform_by_vector : boolean, optional (default: dataframe.has_vector_data)
         Determines whether the data_transform should be applied to the data matrix
         as a whole, or should be applied to macro-nodes individually. Recommended
@@ -122,27 +123,13 @@ class Models():
         if loc_indices:
             A = A[:,loc_indices]
         return A
-    
-    def _get_scale_sklearn(self, T, A):
-        #artifically inflate the stored variance of macro-nodes with 
-        #multiple features so it will be further scaled down.
-        #original in sklearn is np.sqrt(var)
-        #so we want *np.sqrt(num features)
-        return T.scale_*np.sqrt(A.shape[1])
 
-    #TODO remove this logic and make a custom Scaler instead.
     #fits transform and returns transformed `array`, where loc_indices can select
     #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
-    #can accomodate a list of transforms in the order of intended application. In this case, 
-    #it will return a tuple with a list of fitted transforms and then the transformed data.
     def _fit_transform(self, array, loc_indices=None):
         loc_array = self._to_sklearn(array, loc_indices)
         loc_transform = deepcopy(self.data_transform)
-        loc_transform.fit(loc_array)
-        if self.transform_by_vector and (loc_transform.__class__ == sklearn.preprocessing._data.StandardScaler):
-            #scale total variance instead of feature variance to 1
-            loc_transform.scale_ = self._get_scale_sklearn(loc_transform, loc_array)
-        loc_array = self._from_sklearn(loc_transform.transform(loc_array)) 
+        loc_array = self._from_sklearn(loc_transform.fit_transform(loc_array))
         return (loc_transform, loc_array)
 
     #transforms data divided by XYZ. Returns only the fitted transform.

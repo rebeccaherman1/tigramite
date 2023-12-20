@@ -1846,10 +1846,18 @@ class CausalEffects():
         conditional_estimator : sklearn model object, optional (default: None)
             Used to fit conditional causal effects in nested regression. 
             If None, the same model as for estimator is used.
-        data_transform : sklearn preprocessing object, optional (default: None)
+        data_transform : sklearn preprocessing or decomposition object, optional (default: None)
             Used to transform data prior to fitting. For example,
-            sklearn.preprocessing.StandardScaler for simple standardization. The
-            fitted parameters are stored.
+            sklearn.preprocessing.StandardScaler for simple standardization. 
+            sklearn.pipeline.Pipeline can be used for sequential transformations. 
+            Additional custom sklearn-based preprocessors can be found in custom_preprocessors.py.
+            For vectorized data, tigramite.custom_preprocessors.StandardTotalVarianceScaler is
+            recommended. The fitted parameters are stored. 
+        transform_by_vector : boolean, optional (default: None)
+            Determines whether the data_transform should be applied to the data matrix
+            as a whole, or should be applied to macro-nodes individually. Recommended
+            for vectorized dataframes; defaults within Models to whether the dataframe 
+            has vector data.
         mask_type : {None, 'y','x','z','xy','xz','yz','xyz'}
             Masking mode: Indicators for which variables in the dependence
             measure I(X; Y | Z) the samples should be masked. If None, the mask
@@ -1857,11 +1865,6 @@ class CausalEffects():
         ignore_identifiability : bool
             Only applies to adjustment sets supplied by user. Ignores if that 
             set leads to a non-identifiable effect.
-        transform_by_vector : boolean, optional (default: None)
-            Determines whether the data_transform should be applied to the data matrix
-            as a whole, or should be applied to macro-nodes individually. Recommended
-            for vectorized dataframes; defaults within Models to whether the dataframe 
-            is vectorized.
         """
 
         if self.no_causal_path:
