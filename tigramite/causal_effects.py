@@ -1850,10 +1850,11 @@ class CausalEffects():
             Used to transform data prior to fitting. For example,
             sklearn.preprocessing.StandardScaler for simple standardization. 
             sklearn.pipeline.Pipeline can be used for sequential transformations. 
-            Additional custom sklearn-based preprocessors can be found in custom_preprocessors.py.
-            For vectorized data, tigramite.custom_preprocessors.StandardTotalVarianceScaler is
-            recommended. The fitted parameters are stored. 
-        transform_by_vector : boolean, optional (default: None)
+            Additional custom sklearn-based transformations can be found in 
+            data_processing.py under ###Custom sklearn-based transformations###. 
+            For vectorized data, tigramite.data_processing.StandardTotalVarianceScaler
+            is recommended. The fitted parameters are stored. 
+        transform_by_vector : boolean, optional (default: None) #TODO remove macro everywhere; vector!
             Determines whether the data_transform should be applied to the data matrix
             as a whole, or should be applied to macro-nodes individually. Recommended
             for vectorized dataframes; defaults within Models to whether the dataframe 

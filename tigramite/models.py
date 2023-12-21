@@ -17,6 +17,49 @@ from tigramite.data_processing import DataFrame
 from tigramite.pcmci import PCMCI
 from collections import defaultdict, OrderedDict
 
+#returns a list of indices where A (an integer array with one non-trivial axis) equals B (an integer)
+def _where(A, B):
+    #The [0] turns the 2d outputed array from np.where into a 1d array for transformation to a list.
+    return list(np.where(A==B)[0])
+
+#uses the macro_nodes array to determine indices of data features that correspond to the ith macro-level (var, lag). 
+def _get_macro_node(macro_nodes, i):
+    return _where(macro_nodes,i)
+
+#returns index_code corresponding to the ith macro-level node, using the macro_nodes array and the xyz array
+def _get_xyz_from_macro_node(macro_nodes, xyz, i):
+    return xyz[_get_macro_node(macro_nodes, i)[0]]
+
+#The following functions are for manipuating data returned from 
+#data_processing.dataframe.construct_array to be passed into sklearn
+#Data returned from construct_array is of shape (n features, time) for 
+#computational efficiency, while sklearn assumes (n_samples, n_features)
+
+#Select data features of array A using indices I. #TODO perhaps this should actually be an accessible function inside data_processing?
+def _select_features(A, I=None, sklearn=False):
+    if I is not None:
+        if sklearn:
+            A = A[:,I]
+        else:
+            A = A[I,:]
+    return A
+                
+def _get_num_features(A, sklearn=False):
+    if sklearn:
+        return A.shape[1]
+    else:
+        return A.shape[0]
+
+#This function selects data features using indices I and 
+#transposes to be in the correct orientation for sklearn.
+#Inverse action appears below.
+def _to_sklearn(A, I=None):
+    return _select_features(A, I=I).T
+
+#inverse of the transpose above. 
+def _from_sklearn(A):
+    return A.T
+
 class Models():
     """Base class for time series models.
 
@@ -43,9 +86,10 @@ class Models():
         Used to transform data prior to fitting. For example,
         sklearn.preprocessing.StandardScaler for simple standardization. 
         sklearn.pipeline.Pipeline can be used for sequential transformations. 
-        Additional custom sklearn-based preprocessors can be found in custom_preprocessors.py.
-        For vectorized data, tigramite.custom_preprocessors.StandardTotalVarianceScaler is
-        recommended. The fitted parameters are stored. 
+        Additional custom sklearn-based transformations can be found in 
+        data_processing.py under ###Custom sklearn-based transformations###. 
+        For vectorized data, tigramite.data_processing.StandardTotalVarianceScaler
+        is recommended. The fitted parameters are stored. 
     transform_by_vector : boolean, optional (default: dataframe.has_vector_data)
         Determines whether the data_transform should be applied to the data matrix
         as a whole, or should be applied to macro-nodes individually. Recommended
@@ -91,59 +135,33 @@ class Models():
         self.tau_max = None
         self.fit_results = None
         
-    def _where(self, A, B):
-        return list(np.where(A==B)[0])
-    #finds rows in `array` that correspond to xyz
-    def _get_indices(self, xyz, n):
-        return self._where(xyz, self.dataframe.get_index_code(n))
+    #TODO can I turn some of these into module-wide functions?
         
-    #finds rows in `array` that correspond to the ith macro (var, lag). 
-    def _get_macro_node(self, macro_nodes, i):
-        return self._where(macro_nodes,i)
+    #returns a list of the length of each vector identified as a (var, lag) pair in list W
+    def get_vectorized_lengths(self, W):
+        return [self.dataframe.vector_lengths[w[0]] for w in W]   
     
-    def _get_xyz_from_macro_node(self, macro_nodes, xyz, i):
-        return xyz[self._get_macro_node(macro_nodes, i)[0]]
-
-    #selects appropriate indices and transposes to be in the correct orientation for sklearn.
-    def _to_sklearn(self, A, loc_indices=None):
-        if loc_indices is not None:
-            A = self._select_tig(A, loc_indices)
-        return A.T
-
-    #undo the transpose above. Make sure this stays as the inverse of the action above if changed.
-    def _from_sklearn(self, A):
-        return A.T
+    #uses the xyz array to determine indices of data features that correspond to node-type n
+    def _get_indices(self, xyz, n):
+        return _where(xyz, self.dataframe.get_index_code(n))
     
-    #tigramite operates with (n_features, time)
-    def _select_tig(self, A, loc_indices):
-        return A[loc_indices,:]
-    
-    #sklearn operates with (n_samples, n_features)
-    def _select_sklearn(self, A, loc_indices):
-        if loc_indices:
-            A = A[:,loc_indices]
-        return A
-
-    #fits transform and returns transformed `array`, where loc_indices can select
-    #a subset of the rows in `array`. Returns tuple with fitted transform and transformed data.
-    def _fit_transform(self, array, loc_indices=None):
-        loc_array = self._to_sklearn(array, loc_indices)
+    #selects features from `array` using indices I and fits sklearn object to the selected features,
+    #Returns tuple with fitted transform and transformed data. Maintains language of computational efficiency
+    def _fit_transform(self, array, I=None):
+        loc_array = _to_sklearn(array, I=I)
         loc_transform = deepcopy(self.data_transform)
-        loc_array = self._from_sklearn(loc_transform.fit_transform(loc_array))
+        loc_array = _from_sklearn(loc_transform.fit_transform(loc_array))
         return (loc_transform, loc_array)
 
     #transforms data divided by XYZ. Returns only the fitted transform.
     def _fit_xyz_transform(self, array, xyz, n):
         loc_indices = self._get_indices(xyz, n)
-        return self._fit_transform(array, loc_indices)[0]
+        return self._fit_transform(array, I=loc_indices)[0]
 
     #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
     def _fit_macro_transform(self, array, macro_nodes, i):
-        loc_indices = self._get_macro_node(macro_nodes, i)
-        return self._fit_transform(array, loc_indices)
-    
-    def get_vectorized_lengths(self, W):
-        return [self.dataframe.vector_lengths[w[0]] for w in W]
+        loc_indices = _get_macro_node(macro_nodes, i)
+        return self._fit_transform(array, I=loc_indices)
 
     # @profile    
     def get_general_fitted_model(self, 
@@ -282,14 +300,18 @@ class Models():
                 #}
                 array_list = []
                 xyz_list = []
+                macro_node_list = []
                 for i in node_dict.keys(): #doesn't need to be in the same order as otherwise xyz
                     varlag = node_dict[i]
                     self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, i)
                     array_list += [p_array]
-                    xyz_list += [self._get_xyz_from_macro_node(macro_nodes, xyz, i)]*p_array.shape[0] #elements are rows
+                    n_f = _get_num_features(p_array)
+                    xyz_list += [_get_xyz_from_macro_node(macro_nodes, xyz, i)]*n_f 
+                    macro_node_list += [i]*n_f 
                 array = np.concatenate(array_list) #in language of tigramite
                 #update xyz, should update what is used in the helper function as well.
                 xyz = np.array(xyz_list)
+                macro_nodes = np.array(macro_node_list)
                                 
         # Fit the model 
         # Copy and fit the model
@@ -301,8 +323,8 @@ class Models():
             predictor_indices += self._get_indices(xyz, n)
         
         #the following arrays in the language of sklearn
-        predictor_array = self._to_sklearn(array, predictor_indices)
-        target_array = self._to_sklearn(array, self._get_indices(xyz, 'y'))
+        predictor_array = _to_sklearn(array, predictor_indices)
+        target_array = _to_sklearn(array, self._get_indices(xyz, 'y'))
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
@@ -417,14 +439,14 @@ class Models():
         
         #entire function already in language of sklearn
         def list_transform(T, data, I=None, inverse=False):
-            data=self._select_sklearn(data, I)
+            data=_select_features(data, I=I, sklearn=True)
             if inverse:
                 data = T.inverse_transform(X=data)
             else: 
                 data = T.transform(X=data)
             return data
         
-        #N is num macro-nodes; rename everywhere
+        #TODO N is num macro-nodes; rename everywhere
         def macro_transform(fitted_data_transform, N, data, inverse=False):
             lengths = get_index_dict(N)
             data_list = []
@@ -449,7 +471,7 @@ class Models():
                     conditions_data = macro_transform(fitted_data_transform, self.conditions, conditions_data)
                 
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
-        z_array = self._to_sklearn(self.fit_results['observation_array'], 
+        z_array = _to_sklearn(self.fit_results['observation_array'], 
                               self._get_indices(self.fit_results['xyz'], 'e'))
         #time length?
         Tobs = z_array.shape[0]
@@ -457,7 +479,7 @@ class Models():
         #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
         #Use observational data if no chosen values were passed in only.
         if self.conditions is not None and conditions_data is None:
-            s_array = self._to_sklearn(self.fit_results['observation_array'], 
+            s_array = _to_sklearn(self.fit_results['observation_array'], 
                                   self._get_indices(self.fit_results['xyz'], 'z')) 
         
         pred_dict = {}
@@ -606,7 +628,7 @@ class Models():
             dim_z = dim - 2
             # Transform the data if needed
             if self.data_transform is not None:
-                fDT, array = _fit_transform(self, array)
+                fDT, array = self._fit_transform(array)
             # Cache the results
             fit_results[j] = {}
             # Cache the data transform

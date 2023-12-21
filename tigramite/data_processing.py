@@ -15,6 +15,9 @@ import scipy.sparse
 import scipy.sparse.linalg
 from scipy import stats
 from numba import jit
+from sklearn.preprocessing import StandardScaler
+
+#pep8 style conventions; ie spaces around comparison etc
 
 index_codes = {'x' : 0,
                'y' : 1,
@@ -54,7 +57,7 @@ class DataFrame():
         2*tau_max (more precisely, this depends on the cut_off argument in
         self.construct_array(), see further below). This avoids biases, see
         section on masking in Supplement of Runge et al. SciAdv (2019).
-    vector_vars : dict or integer list
+    vector_vars : dict or integer list #TODO share with Wiebke and Urmi
         Dictionary of vector variables of the form,
         Eg. {0: [(0, 0), (1, 0)], 1: [(2, 0)], 2: [(3, 0)], 3: [(4, 0)]}
         The keys are the new vectorized variables and respective tuple values
@@ -134,17 +137,17 @@ class DataFrame():
     self.vector_vars:
         If vector_vars is None:
             Is {i: (i, 0) for i in range(self.N)}
-        else if vector_vars is a dictionary:
+        elif vector_vars is a dictionary:
             Is vector_vars
-        else if vector_vars is an integer list:
+        elif vector_vars is an integer list:
             dictionary created internally so all elements of each vector are at lag 0, 
-            and vectors cover all data without overlapping
+            and vectors cover all data without overlapping #TODO match wording above
     self.vector_lengths:
         If vector_vars is an integer list:
             Is np.array(vector_vars)
-        Else if vector_vars is a dictionary:
+        elif vector_vars is a dictionary:
             np.array containing the length of each vector
-        Else if vector_vars is None:
+        elif vector_vars is None:
             an array of 1s for non-vectorized data
     self.has_vector_data:
         True if vector_vars is not None, else False
@@ -167,8 +170,8 @@ class DataFrame():
         Number of datasets
     self.N : int
         Number of variables (constant across datasets)
-    self.Ndata : int
-        Number of micro-features
+    self.Ndata : int #TODO get rid of micro as well and change features to variables
+        Number of input variables in dataframe
     self.T : dictionary
         Dictionary {key(m): T(m), ...}, where T(m) is the time length of
         datasets m and key(m) its identifier as in self.values
@@ -676,14 +679,17 @@ class DataFrame():
                 -X and Y are each only one macro-node
                 -Z (attempted separating set) is constructed to avoid X and Y.
                 -extraZ doesn't exist
-            macro-level overlaps and duplicates can happen in effect estimation:
-                -Z may have duplicates and overlaps because of user input. Remove from Z if overlaps with X or Y.
-                -extraZ may also have duplicates or overlap with X or Y by constrution of the separating set. (Is this really possible?)
+            macro-level overlaps and duplicates can happen in effect estimation: TODO all errors no warnings
+                -user could define adjustment_set -> extraZ
+                -all macro-duplicates from user input are removed in effect_estimation
+                TODO in causal_effect _check_validity, check for duplicates (applied to user input)
+                -Z may have overlaps because of user input. Remove from Z if overlaps with X or Y.
+                -extraZ may also have duplicates or overlap with X or Y by user definition
             =>may be removed elsewhere (with warnings!); here we only worry about micro-level overlaps and duplicates
 
             return_macro_nodes: will be true for causal effect estimation.
             (remove_overlaps, remove_duplicates)
-            causal discovery: (T, T) 
+            causal discovery: (T, T) #Talk to Wiebke and Urmi about their use cases and what we would want.
                 -remove duplicates from Z (X and Y have only one macro-node and extraZ doesn't exist, so can't hurt if easier)
                 -remove overlaps from x and y if appear in Z -- breaking change
             causal effect estimation with transformation: (F, F)
@@ -691,6 +697,17 @@ class DataFrame():
             causal effect estimation without transformation: (F, T)
                 -remove micro duplicates from X, Z, extraZ (removing from Y would reduce computation but not accuracy, and could make it hard to interpret later)
                 -remove overlaps from extraz and z if appear in X or other Z
+                
+                TODOTODO!
+                BRAINSTORMED IDEAS:
+                -data transformation during creation of dataframe
+                -function that could be called by user or Models to update that transformation
+                -insist on such transformation if there are overlaps? Or might we have some clever conditional independence test or kernel thing?
+                -should dimension reduction ever be done for Z together or always at the Macro-node level?
+                    I argue: always the macro-node level, or there's no point in having the data appear in more than one node -- one would be enough
+                -could then remove transformation logic from models? or keep both?
+                -let overlaps throw warnings and give nans during causal discovery?
+                -think about multiple datasets and dummy variables -- should they be labelled
             
         cut_off : {'2xtau_max', 'tau_max', 'max_lag', 'max_lag_or_tau_max', 2xtau_max_future}
             If cut_off == '2xtau_max':
@@ -1652,6 +1669,38 @@ def structural_causal_process(links, T, noises=None,
     print("data generating models are now in toymodels folder: "
          "from tigramite.toymodels import structural_causal_processes as toys.")
     return None
+
+#imported and mentioned in a different way
+###Custom sklearn-based transformations###
+
+class StandardTotalVarianceScaler(StandardScaler):
+    #As in sklearn's StandardScaler, but total variance is scaled rather than 
+    #feature variance. Total variance of an array A_ij with I samples and J 
+    #features is defined to be sum_ij(a_ij)/I.
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+    
+    def fit(self, X, y=None, sample_weight=None, preserve_relative_scaling=True):
+        #When preserve_relative_scaling is True, only the total variance of the entire 
+        #dataset is used to determine a constant scaling for all columns. When False,
+        #columns are normalized individually and then further scaled down to account for
+        #the number of columns.
+        T = super().fit(X, sample_weight=sample_weight)
+        if preserve_relative_scaling:
+            #The original StandardScaler checks for constant features
+            #and will have trouble if all features are constant
+            #here, we care only about the total variance, which should not
+            #have this problem.
+            T.scale_ = np.sqrt(np.sum(T.var_))*np.ones(T.scale_.shape)
+        else:
+            #Usually np.sqrt(var). Here, we artificially inflate
+            #this by np.sqrt(the number of features) so the data 
+            #will be further scaled down for a total variance of 1.
+            #as implemented here, this still scales features individually.
+            #could instead scale the whole vector by the total variance,
+            #and thus preserve relative scaling within the vector.
+            T.scale_ *= np.sqrt(T.n_features_in_)
+        return T
 
 
 if __name__ == '__main__':
