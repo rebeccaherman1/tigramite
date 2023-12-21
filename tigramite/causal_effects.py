@@ -71,7 +71,7 @@ class CausalEffects():
         
         self.verbosity = verbosity
         self.N = graph.shape[0]
-
+        
         if S is None:
             S = []
 
@@ -79,9 +79,17 @@ class CausalEffects():
         self.listY = list(Y)
         self.listS = list(S)
 
+        #remove duplicates
         self.X = set(X)
         self.Y = set(Y)
-        self.S = set(S)    
+        self.S = set(S)   
+        
+        #Throw errors for user inputs with duplicates or overlaps. Only the adjustment is not yet taken care of.
+        if((len(self.X)+len(self.Y)+len(self.S)) < len(self.listX+self.listY+self.listS)):
+            raise ValueError("Detected duplicate nodes in X, Y, and/or Z. Please remove duplicates.")
+        all_nodes = list(self.X)+list(self.Y)+list(self.S)
+        if(len(set(all_nodes)) < len(all_nodes)):
+            raise ValueError("Detected overlaps between the nodes for X, Y, and Z. Please remove overlaps.")
 
         # 
         # Checks regarding graph type
@@ -1854,9 +1862,9 @@ class CausalEffects():
             data_processing.py under ###Custom sklearn-based transformations###. 
             For vectorized data, tigramite.data_processing.StandardTotalVarianceScaler
             is recommended. The fitted parameters are stored. 
-        transform_by_vector : boolean, optional (default: None) #TODO remove macro everywhere; vector!
+        transform_by_vector : boolean, optional (default: None)
             Determines whether the data_transform should be applied to the data matrix
-            as a whole, or should be applied to macro-nodes individually. Recommended
+            as a whole, or should be applied to vector-nodes individually. Recommended
             for vectorized dataframes; defaults within Models to whether the dataframe 
             has vector data.
         mask_type : {None, 'y','x','z','xy','xz','yz','xyz'}
@@ -1885,6 +1893,7 @@ class CausalEffects():
         if self.N != self.dataframe.N:
             raise ValueError("Dataset dimensions inconsistent with number of variables in graph.")
 
+        #constructed sets are truly sets and have no duplicates or unwanted overlaps
         if adjustment_set == 'optimal':
             # Check optimality and use either optimal or colliders_only set
             adjustment_set = self.get_optimal_set()
@@ -1893,6 +1902,10 @@ class CausalEffects():
         elif adjustment_set == 'minimized_optimal':
             adjustment_set = self.get_optimal_set(minimize=True)
         else:
+            if len(set(adjustment_set)) < len(adjustment_set):
+                raise ValueError("Chosen adjustment_set has duplicates.")
+            if len(set(adjustment_set+self.listX+self.listY)) < (len(adjustment_set)+len(self.X)+len(self.Y)):
+                raise ValueError("Chosen adjustment set overlaps with X and/or Y.")
             if ignore_identifiability is False and self._check_validity(adjustment_set) is False:
                 raise ValueError("Chosen adjustment_set is not valid.")
 

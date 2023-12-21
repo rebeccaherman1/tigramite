@@ -13,7 +13,7 @@ import numpy as np
 import sklearn
 import sklearn.linear_model
 import networkx
-from tigramite.data_processing import DataFrame
+from tigramite.data_processing import DataFrame, _select_variables, _get_num_variables
 from tigramite.pcmci import PCMCI
 from collections import defaultdict, OrderedDict
 
@@ -22,39 +22,19 @@ def _where(A, B):
     #The [0] turns the 2d outputed array from np.where into a 1d array for transformation to a list.
     return list(np.where(A==B)[0])
 
-#uses the macro_nodes array to determine indices of data features that correspond to the ith macro-level (var, lag). 
-def _get_macro_node(macro_nodes, i):
-    return _where(macro_nodes,i)
+#uses the vector_nodes array to determine indices of data variables that correspond to the ith vector-level (var, lag). 
+def _get_vector_node(vector_nodes, i):
+    return _where(vector_nodes,i)
 
-#returns index_code corresponding to the ith macro-level node, using the macro_nodes array and the xyz array
-def _get_xyz_from_macro_node(macro_nodes, xyz, i):
-    return xyz[_get_macro_node(macro_nodes, i)[0]]
+#returns index_code corresponding to the ith vector-level node, using the vector_nodes array and the xyz array
+def _get_xyz_from_vector_node(vector_nodes, xyz, i):
+    return xyz[_get_vector_node(vector_nodes, i)[0]]
 
-#The following functions are for manipuating data returned from 
-#data_processing.dataframe.construct_array to be passed into sklearn
-#Data returned from construct_array is of shape (n features, time) for 
-#computational efficiency, while sklearn assumes (n_samples, n_features)
-
-#Select data features of array A using indices I. #TODO perhaps this should actually be an accessible function inside data_processing?
-def _select_features(A, I=None, sklearn=False):
-    if I is not None:
-        if sklearn:
-            A = A[:,I]
-        else:
-            A = A[I,:]
-    return A
-                
-def _get_num_features(A, sklearn=False):
-    if sklearn:
-        return A.shape[1]
-    else:
-        return A.shape[0]
-
-#This function selects data features using indices I and 
+#This function selects data variables using indices I and 
 #transposes to be in the correct orientation for sklearn.
 #Inverse action appears below.
 def _to_sklearn(A, I=None):
-    return _select_features(A, I=I).T
+    return _select_variables(A, I=I, efficient_representation=True).T
 
 #inverse of the transpose above. 
 def _from_sklearn(A):
@@ -92,7 +72,7 @@ class Models():
         is recommended. The fitted parameters are stored. 
     transform_by_vector : boolean, optional (default: dataframe.has_vector_data)
         Determines whether the data_transform should be applied to the data matrix
-        as a whole, or should be applied to macro-nodes individually. Recommended
+        as a whole, or should be applied to vector-level nodes individually. Recommended
         for vectorized dataframes; defaults to whether the dataframe is vectorized.
     mask_type : {None, 'y','x','z','xy','xz','yz','xyz'}
         Masking mode: Indicators for which variables in the dependence
@@ -135,17 +115,15 @@ class Models():
         self.tau_max = None
         self.fit_results = None
         
-    #TODO can I turn some of these into module-wide functions?
-        
     #returns a list of the length of each vector identified as a (var, lag) pair in list W
     def get_vectorized_lengths(self, W):
         return [self.dataframe.vector_lengths[w[0]] for w in W]   
     
-    #uses the xyz array to determine indices of data features that correspond to node-type n
-    def _get_indices(self, xyz, n):
-        return _where(xyz, self.dataframe.get_index_code(n))
+    #uses the xyz array to determine indices of data variables that correspond to node-type n
+    def _get_indices(self, xyz, xyzid):
+        return _where(xyz, self.dataframe.get_index_code(xyzid))
     
-    #selects features from `array` using indices I and fits sklearn object to the selected features,
+    #selects variables from `array` using indices I and fits sklearn object to the selected variables,
     #Returns tuple with fitted transform and transformed data. Maintains language of computational efficiency
     def _fit_transform(self, array, I=None):
         loc_array = _to_sklearn(array, I=I)
@@ -154,13 +132,13 @@ class Models():
         return (loc_transform, loc_array)
 
     #transforms data divided by XYZ. Returns only the fitted transform.
-    def _fit_xyz_transform(self, array, xyz, n):
-        loc_indices = self._get_indices(xyz, n)
+    def _fit_xyz_transform(self, array, xyz, xyzid):
+        loc_indices = self._get_indices(xyz, xyzid)
         return self._fit_transform(array, I=loc_indices)[0]
 
-    #transforms data divided by macro node and lag. Returns fitted transform and transformed data.
-    def _fit_macro_transform(self, array, macro_nodes, i):
-        loc_indices = _get_macro_node(macro_nodes, i)
+    #transforms data separated by vector node and lag. Returns fitted transform and transformed data.
+    def _fit_vector_transform(self, array, vector_nodes, i):
+        loc_indices = _get_vector_node(vector_nodes, i)
         return self._fit_transform(array, I=loc_indices)
 
     # @profile    
@@ -203,38 +181,25 @@ class Models():
             Returns the sklearn model after fitting. Also returns the data
             transformation parameters.
         """
-
+        if Z is None:
+            Z = []
+        if conditions is None:
+            conditions = []
+        if any([len(set(x)) < len(x) for x in [X, Y, Z, conditions]]):
+            raise ValueError("Detected duplicates in X, Y, Z, or conditions")
+        #allow for the possibility of receiving overlapping Z and conditions
+        Zs = list(set(Z+conditions))
+        if len(set(X+Y+Zs)) < len(X+Y+Zs):
+            raise ValueError("Detected overlaps between Z+conditions, X, and Y.")
+        #remove from Z, the adjustment set, if overlaps with conditions
+        #this is preferred because the user might want to pass in specific values for conditions
+        self.Z = [node for node in Z if (node not in conditions)]
+        self.X = X
+        self.Y = Y
+        self.conditions = conditions
+        
         def get_vectorized_length(W):
             return sum(self.get_vectorized_lengths(W))
-        
-        def warn_duplicates_overlaps(R, X, n, msg):
-            if n is not None:
-                if len(R)<len(X):
-                    Warnings.warn(msg.format(n))
-        
-        def remove_duplicates(X, n=None):
-            R = list(OrderedDict.fromkeys(X))
-            warn_duplicates_overlaps(R, X, n, "Removing macro-level duplicates from {}")
-            return R
-        
-        #O, a list of nodes; i.e. X+extraZ
-        def remove_overlaps(X, O, n=None):
-            R = [node for node in X if (node not in O)]
-            warn_duplicates_overlaps(R, X, n, "Removing macro-level overlaps from {}")
-            return R
-        
-        def remove_duplicates_and_overlaps(X, O, n=None):
-            if X is None:
-                return []
-            else:
-                return remove_overlaps(remove_duplicates(X, n), O, n)
-        
-        #remove macro-duplicates and overlaps here
-        self.X = remove_duplicates(X, 'X')
-        self.Y = remove_duplicates(Y, 'Y')
-        self.conditions = remove_duplicates_and_overlaps(conditions, self.X+self.Y, 'user-defined conditions')
-        self.Z = remove_duplicates_and_overlaps(Z, self.conditions+self.X+self.Y) 
-        #prefer to keep condition over adjustment set because user might want to pass in a specific value for the condition.
         
         self.lenX = get_vectorized_length(self.X)
         self.lenS = get_vectorized_length(self.conditions)
@@ -257,7 +222,7 @@ class Models():
                                  "" % (self.tau_max, max_lag))
 
         # Construct array of shape (var, time)
-        array, xyz, macro_nodes, node_dict, _ = \
+        array, xyz, vector_nodes, node_dict, _ = \
             self.dataframe.construct_array(X=self.X, Y=self.Y,  
                                            Z=self.conditions,
                                            extraZ=self.Z,
@@ -267,7 +232,7 @@ class Models():
                                            remove_overlaps = False,
                                            remove_duplicates = not self.transform_by_vector,
                                            verbosity=self.verbosity,
-                                           return_macro_nodes=True)
+                                           return_node_info=True)
                                             
         # Transform the data if needed. updates 'array' in place, as well as 'xyz'
         self.fitted_data_transform = None
@@ -289,7 +254,7 @@ class Models():
                 # Now transform whole array
                 array = self._fit_transform(array)[1]
             
-            #store the transforms by macro (var, lag), and make a new xyz array. 
+            #store the transforms by (var, lag), and make a new xyz array. 
             #Can access X transforms later by looking at self.X
             else:
                 #node_group_translator = {
@@ -300,18 +265,18 @@ class Models():
                 #}
                 array_list = []
                 xyz_list = []
-                macro_node_list = []
+                vector_node_list = []
                 for i in node_dict.keys(): #doesn't need to be in the same order as otherwise xyz
                     varlag = node_dict[i]
-                    self.fitted_data_transform[varlag], p_array = self._fit_macro_transform(array, macro_nodes, i)
+                    self.fitted_data_transform[varlag], p_array = self._fit_vector_transform(array, vector_nodes, i)
                     array_list += [p_array]
-                    n_f = _get_num_features(p_array)
-                    xyz_list += [_get_xyz_from_macro_node(macro_nodes, xyz, i)]*n_f 
-                    macro_node_list += [i]*n_f 
+                    n_f = _get_num_variables(p_array, efficient_representation=True)
+                    xyz_list += [_get_xyz_from_vector_node(vector_nodes, xyz, i)]*n_f 
+                    vector_node_list += [i]*n_f 
                 array = np.concatenate(array_list) #in language of tigramite
                 #update xyz, should update what is used in the helper function as well.
                 xyz = np.array(xyz_list)
-                macro_nodes = np.array(macro_node_list)
+                vector_nodes = np.array(vector_node_list)
                                 
         # Fit the model 
         # Copy and fit the model
@@ -319,8 +284,8 @@ class Models():
 
         #requires new, transformed xyz matrix
         predictor_indices = []
-        for n in ['x', 'e', 'z']:
-            predictor_indices += self._get_indices(xyz, n)
+        for i in ['x', 'e', 'z']:
+            predictor_indices += self._get_indices(xyz, i)
         
         #the following arrays in the language of sklearn
         predictor_array = _to_sklearn(array, predictor_indices)
@@ -347,7 +312,7 @@ class Models():
         fit_results['model'] = a_model
         # Cache the data transform
         fit_results['fitted_data_transform'] = self.fitted_data_transform
-        fit_results['macro_nodes'] = macro_nodes
+        fit_results['vector_nodes'] = vector_nodes
         fit_results['node_dict'] = node_dict
 
         # Cache and return the fit results
@@ -370,9 +335,9 @@ class Models():
         Parameters
         ----------
         intervention_data : numpy array
-            Numpy array of shape (N interventions, len(X)) that contains the do(X) values.
+            Numpy array of shape (n interventions, len(X)) that contains the do(X) values.
         conditions_data : data object, optional
-            Numpy array of shape (N interventions, len(S)) that contains the S=s values.
+            Numpy array of shape (n interventions, len(S)) that contains the S=s values.
         pred_params : dict, optional
             Optional parameters passed on to sklearn prediction function (model and
             conditional_model).
@@ -389,8 +354,8 @@ class Models():
         Results from prediction.
         """
 
-        #data that's passed in is of shape (N interventions, N features), while
-        #data from observation_array is of shape (N features, time)
+        #data that's passed in is of shape (n interventions, n variables), while
+        #data from observation_array is of shape (n variables, time)
         
         # Check the model is fitted.
         if self.fit_results is None:
@@ -439,25 +404,24 @@ class Models():
         
         #entire function already in language of sklearn
         def list_transform(T, data, I=None, inverse=False):
-            data=_select_features(data, I=I, sklearn=True)
+            data=_select_variables(data, I=I)
             if inverse:
                 data = T.inverse_transform(X=data)
             else: 
                 data = T.transform(X=data)
             return data
         
-        #TODO N is num macro-nodes; rename everywhere
-        def macro_transform(fitted_data_transform, N, data, inverse=False):
-            lengths = get_index_dict(N)
+        def vector_transform(fitted_data_transform, node_list, data, inverse=False):
+            lengths = get_index_dict(node_list)
             data_list = []
-            for varlag in N:
+            for varlag in node_list:
                 data_list += [list_transform(fitted_data_transform[varlag], data, I=lengths[varlag], inverse=inverse)]
             return np.concatenate(data_list, axis=1)
         
-        def xyz_transform(fitted_data_transform, N, data, inverse=False):
-            return list_transform(fitted_data_transform[N], data, inverse=inverse)
+        def xyz_transform(fitted_data_transform, XYZid, data, inverse=False):
+            return list_transform(fitted_data_transform[XYZid], data, inverse=inverse)
             
-        # Transform the data if needed -- data passed in. Return as (N interventions, N features)
+        # Transform the data if needed -- data passed in. Return as (n interventions, n variables)
         fitted_data_transform = self.fit_results['fitted_data_transform']
         if transform_interventions_and_prediction and fitted_data_transform is not None:
             if not self.transform_by_vector:
@@ -466,9 +430,9 @@ class Models():
                 if self.conditions is not None and conditions_data is not None:
                     conditions_data = xyz_transform(fitted_data_transform, 'S', conditions_data)
             else:
-                intervention_data = macro_transform(fitted_data_transform, self.X, intervention_data)
+                intervention_data = vector_transform(fitted_data_transform, self.X, intervention_data)
                 if self.conditions is not None and conditions_data is not None:
-                    conditions_data = macro_transform(fitted_data_transform, self.conditions, conditions_data)
+                    conditions_data = vector_transform(fitted_data_transform, self.conditions, conditions_data)
                 
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
         z_array = _to_sklearn(self.fit_results['observation_array'], 
@@ -485,7 +449,7 @@ class Models():
         pred_dict = {}
 
         # Now iterate through interventions (and potentially S)
-        # enumerate will iterate through ROWs -- ok when (N interventions, N features)
+        # enumerate will iterate through ROWs -- ok when (n interventions, n variables)
         for index, dox_vals in enumerate(intervention_data):
             # Construct XZS-array. rehape makes size a lenth-2 tuple rather than length-1.
             intervention_array = dox_vals.reshape(1, Transformed_lenX) * np.ones((Tobs, Transformed_lenX))
@@ -519,9 +483,9 @@ class Models():
                                                    predicted_vals, inverse=True).squeeze()
                     #fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
                 else:
-                    predicted_vals = macro_transform(fitted_data_transform, self.Y, predicted_vals, inverse=True)
+                    predicted_vals = vector_transform(fitted_data_transform, self.Y, predicted_vals, inverse=True)
 
-            #(n interventions, n features), whether transform_interventions_and_prediction is True or False
+            #(n interventions, n variables), whether transform_interventions_and_prediction is True or False
             pred_dict[index] = predicted_vals
 
             # Apply aggregation function

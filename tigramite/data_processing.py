@@ -17,12 +17,41 @@ from scipy import stats
 from numba import jit
 from sklearn.preprocessing import StandardScaler
 
-#pep8 style conventions; ie spaces around comparison etc
+#TODO pep8 style conventions; ie spaces around comparison etc
 
 index_codes = {'x' : 0,
                'y' : 1,
                'z' : 2,
                'e' : 3}
+
+"""The following functions are for manipuating data extracted from DataFrame.
+Data is stored in the usual way, with shape (time, N variables). This is 
+consistent with the orientation expected by external processors such as sklearn.
+However, data returned from construct_array is of shape (n<=N variables, time) for 
+computational efficiency. Efficient_representation=True should be used with 
+output of construct_array.
+"""
+
+def _select_variables(A, I=None, efficient_representation=False):
+    """Select data variables of array A using indices I. 
+    When efficient_representation=False, each column contains a different variable, 
+    as is standard for data storage. This is used for tigramite dataframe data 
+    storage and for external processors like sklearn. When efficient_representation=True, 
+    each row contains a different variable. Efficient should be set to True when using 
+    the output of construct_array.
+    """ 
+    if I is not None:
+        if efficient_representation:
+            A = A[I,:]
+        else:
+            A = A[:,I]
+    return A
+
+def _get_num_variables(A, efficient_representation=False):
+    if efficient_representation:
+        return A.shape[0]
+    else:
+        return A.shape[1]
 
 class DataFrame():
     """Data object containing single or multiple time series arrays and optional 
@@ -140,8 +169,8 @@ class DataFrame():
         elif vector_vars is a dictionary:
             Is vector_vars
         elif vector_vars is an integer list:
-            dictionary created internally so all elements of each vector are at lag 0, 
-            and vectors cover all data without overlapping #TODO match wording above
+            dictionary created internally assuming vectors do not overlap and span 
+            the dataframe, appear in order in the dataframe, and use only lag=0
     self.vector_lengths:
         If vector_vars is an integer list:
             Is np.array(vector_vars)
@@ -170,7 +199,7 @@ class DataFrame():
         Number of datasets
     self.N : int
         Number of variables (constant across datasets)
-    self.Ndata : int #TODO get rid of micro as well and change features to variables
+    self.Ndata : int
         Number of input variables in dataframe
     self.T : dictionary
         Dictionary {key(m): T(m), ...}, where T(m) is the time length of
@@ -322,17 +351,36 @@ class DataFrame():
 
         self.has_vector_data = (vector_vars is not None)  
         
+        def check_type(lst, tp, msg):
+            check = [isinstance(x, tp) for x in lst]
+            if not all(check):
+                typ = next(type(x) for x in lst if not isinstance(x, tp))
+                raise TypeError(msg.format(typ))
+        
         # Setup dictionary of variables for vector mode
         if vector_vars is not None:
             if isinstance(vector_vars, dict):
+                check_type(vector_vars.keys(), int, "keys in vector_vars dictionary must be integers, not {}")
+                if not all([k>=0 for k in vector_vars.keys()]):
+                    raise ValueError("keys in vector_vars dictionary must be non-negative")
+                check_type([v for _, v in vector_vars.items()], list, "values in vector_vars dictionary must be lists, not {}")
+                check_type([e for _, v in vector_vars.items() for e in v], tuple, "values in vector_vars dictionary must be lists of tuples, not lists of {}")
+                check_type([e for _, v in vector_vars.items() for t in v for e in t], int, "every element in every tuple in the vector_vars dictionary must be an integer, not {}")
+                if not all([n[0]>=0 and n[0]<self.Ndata for _, v in vector_vars.items() for n in v]):
+                    raise ValueError("the first element in each tuple in the vector_vars dictionary must be an integer between 0 and {} (the last input variable)".format(self.Ndata-1))
+                if not all([n[1]<=0 for _, v in vector_vars.items() for n in v]):
+                    raise ValueError("the second element in each tuple in the vector_vars dictionary must be a non-positive integer")
+                nodes_w_duplicates = sum([len(set(v))<len(v) for _, v in vector_vars.items()])
+                if nodes_w_duplicates > 0:
+                    raise ValueError("{} vector nodes contain duplicate input variables".format(nodes_w_duplicates))
                 v_lst = [e[0] for _, v in vector_vars.items() for e in v]
                 sl = len(set(v_lst))
                 vl = len(v_lst)
                 if sl<vl:
-                    msg = "Some data features appear in multiple macro-nodes! There are {} duplicates of micro-features in the macro-dataframe"
+                    msg = "Some input variables appear in multiple vector nodes! There are {} duplicates of input variables in the vectorized dataframe"
                     warnings.warn(msg.format(vl-sl))
                 if sl<self.Ndata:
-                    msg = "{} data features are not included in any macro-nodes!"
+                    msg = "{} input variables are not included in any vector nodes!"
                     warnings.warn(msg.format(self.Ndata-sl))
                 self.vector_vars = vector_vars
                 self.vector_lengths = np.array([len(self.vector_vars[k]) for k in self.vector_vars.keys()])
@@ -342,18 +390,18 @@ class DataFrame():
                     raise TypeError("vector_vars does not accept a list of {}; please input a dictionary or a list of integers.".format(t))
                 svl=sum(vector_vars)
                 if svl!=self.Ndata:
-                    raise ValueError("VECTOR_LENGTHS don't add up to number of vector elements in DATA: {} != {}".format(svl, self.Ndata))
+                    raise ValueError("VECTOR_LENGTHS don't span the dataset, covering only {} of {} input variables".format(svl, self.Ndata))
                 self.vector_lengths = np.array(vector_vars)
                 self.vector_vars = self.make_vector_node_dict(vector_vars)
             else:
-                raise TypeError("vector_vars must be a dictionary or an integer list, not type {}".format(type(vector_vars)))
+                raise TypeError("vector_vars must be a dictionary of (var, lag) pairs or an integer list, not type {}".format(type(vector_vars)))
         else:
             self.vector_vars = dict(zip(range(self.Ndata), [[(i, 0)] 
                                 for i in range(self.Ndata)]))
             self.vector_lengths = np.array([1]*self.Ndata)
         
         self.N = len(self.vector_vars)
-        
+
         # Warnings
         if self.analysis_mode == 'single' and self.N > next(iter(self.T.values())):
             warnings.warn("In analysis mode 'single', 'data'.shape = ({}, {});"\
@@ -363,8 +411,7 @@ class DataFrame():
         if self.analysis_mode == 'multiple' and self.M == 1:
             warnings.warn("In analysis mode 'multiple'. There is just a "\
                 "single dataset, is this as intended?'")
-
-
+        
         # Save the variable names. If unspecified, use the default
         if var_names is None:
             self.var_names = {i: i for i in range(self.N)}
@@ -617,7 +664,7 @@ class DataFrame():
                         mask_type=None,
                         data_type=None,
                         remove_duplicates=True,
-                        return_macro_nodes=False,
+                        return_node_info=False,
                         return_cleaned_xyz=False,
                         do_checks=True,
                         remove_overlaps=True,
@@ -657,14 +704,14 @@ class DataFrame():
             Whether to perform sanity checks on input X,Y,Z
         remove_duplicates: bool, optional (default: True)
             Recommended False for effect estimation with vectorized dataframes.
-            When False, prevents removing micro-level duplicates and overlaps from the dataframe -- 
-            a step which destroys macro-logic. 
-        return_macro_nodes : bool, optional (default: False)
-            Whether to return MACRO_NODES, which identifies which macro (var, lag) each element in the 
-            ARRAY came from with a unique int, and NODE_DICT, which translates the int into the macro 
+            When False, prevents removing input-level duplicates and overlaps from the dataframe -- 
+            a step which destroys vector-node-based logic. 
+        return_node_info : bool, optional (default: False)
+            Whether to return VECTOR_NODES, which uses unique integers to identify which vector (var, lag)
+            produced each variable in the ARRAY, and NODE_DICT, which translates the int into the vector 
             (var, lag) pair. These only have meaning when remove_duplicates is False.
         remove_overlaps : bool, optional (default: True)
-            Whether to remove micro-level elements from X and Y if they overlap with Z, for the purpose of causal discovery. -- breaking change
+            Whether to remove input variables from X and Y if they overlap with Z, for the purpose of causal discovery. -- breaking change
                         
             #TODO triple-check this logic with Jakob
             "Duplicates" refers to repeats within a group X, Y, Z, or extraZ
@@ -679,15 +726,13 @@ class DataFrame():
                 -X and Y are each only one macro-node
                 -Z (attempted separating set) is constructed to avoid X and Y.
                 -extraZ doesn't exist
-            macro-level overlaps and duplicates can happen in effect estimation: TODO all errors no warnings
-                -user could define adjustment_set -> extraZ
-                -all macro-duplicates from user input are removed in effect_estimation
-                TODO in causal_effect _check_validity, check for duplicates (applied to user input)
-                -Z may have overlaps because of user input. Remove from Z if overlaps with X or Y.
-                -extraZ may also have duplicates or overlap with X or Y by user definition
-            =>may be removed elsewhere (with warnings!); here we only worry about micro-level overlaps and duplicates
+            macro-level overlaps and duplicates can happen in effect estimation:
+                -all macro-duplicates from user input X, Y, conditions throw errors in effect_estimation and models
+                -Next to _check_validity, check for duplicates in user adjustment_set and throw error
+                -adjustment set and conditions may have overlaps because of user input. Remove from adjustment set if overlaps with conditions.
+            => here we only worry about micro-level overlaps and duplicates
 
-            return_macro_nodes: will be true for causal effect estimation.
+            return_node_info: will be true for causal effect estimation.
             (remove_overlaps, remove_duplicates)
             causal discovery: (T, T) #Talk to Wiebke and Urmi about their use cases and what we would want.
                 -remove duplicates from Z (X and Y have only one macro-node and extraZ doesn't exist, so can't hurt if easier)
@@ -768,19 +813,19 @@ class DataFrame():
 
         Returns
         -------
-        array, xyz [,XYZ] [,macro_nodes, node_dict], data_type : Tuple of data 
+        array, xyz [,XYZ] [,vector_nodes, node_dict], data_type : Tuple of data 
             array of shape (dim, n_samples), xyz identifier array of shape (dim,) 
             identifying which row in array corresponds to X, Y, and Z, and the 
             type mask that indicates which samples are continuous or discrete. 
             For example: X = [(0, -1)], Y = [(1, 0)], Z = [(1, -1), (0, -2)] 
             yields an array of shape (4, n_samples) and xyz is 
             xyz = numpy.array([0,1,2,2]). If return_cleaned_xyz is True, also 
-            outputs the cleaned XYZ lists. If return_macro_nodes is True, also
-            outputs the macro_nodes array and node_dict, which together provide
-            the macro-information that would otherwise be lost during the creation
-            of the array from a vectorized dataset. Node dict defines macro 
+            outputs the cleaned XYZ lists. If return_node_info is True, also
+            outputs the vector_nodes array and node_dict, which together provide
+            the vector information that would otherwise be lost during the creation
+            of the array from a vectorized dataset. Node dict defines vector 
             node-and-lag indices in terms of their (var, lag) tuple,
-            while macro_nodes identifies which macro node-and-lag provided each entry 
+            while vector_nodes identifies which vector node-and-lag provided each entry 
             in the returned 'array'.
         """
 
@@ -799,12 +844,12 @@ class DataFrame():
         
         #assume no overlap here -- should be checked before arguments are passed in.
         all_nodes = X+Y+Z+extraZ
-        #macro-nodes may appear multiple times in all_nodes at different lags. So we define new macro indeces, and the following
-        #dict maps these indices to the macro tuple (var, lag).
+        #vector variables may appear multiple times in all_nodes at different lags. So we define new indices, and the following
+        #dict maps these indices to the vector-level tuple (var, lag).
         node_dict = {i: all_nodes[i] for i in range(len(all_nodes))}
-        #array like xyz which shows which macro (var, lag) pair the microvariables in OBSERVATION_ARRAY come from.
+        #array like xyz which shows which vector-level (var, lag) pair the variables in OBSERVATION_ARRAY come from.
         #node_dict[k][0] retrieves just the node index to use for vector_lengths
-        macro_nodes = np.array([k for k in node_dict.keys() for i in range(self.vector_lengths[node_dict[k][0]])])
+        vector_nodes = np.array([k for k in node_dict.keys() for i in range(self.vector_lengths[node_dict[k][0]])])
                     
         # If vector-valued variables exist, add them
         def vectorize(varlag):     
@@ -826,28 +871,28 @@ class DataFrame():
         
         def remove_duplicates(X, n=None):
             R = list(OrderedDict.fromkeys(X))
-            warn_duplicates_overlaps(R, X, n, "Removing micro-level duplicates from {}")
+            warn_duplicates_overlaps(R, X, n, "Removing input-level duplicates from {}")
             return R
         
         #O, a list of nodes; i.e. X+extraZ
         def remove_overlaps(X, O, n=None):
             R = [node for node in X if (node not in O)]
-            warn_duplicates_overlaps(R, X, n, "Removing micro-level overlaps from {}")
+            warn_duplicates_overlaps(R, X, n, "Removing input-level overlaps from {}")
             return R
         
         if remove_duplicates: #when a transformation that needs duplicates and overlaps will not be applied
-            #remove micro-level duplicates within each set of nodes
+            #remove input-level duplicates within each set of nodes
             #not necessary for Y because it will always be a target, whether causal discovery or effect estimation
             #TODO if happens for X during effect estimation, then how will we pass in data later?!
             X = remove_duplicates(X, 'x')
             Z = remove_duplicates(Z, 'z')
             extraZ = remove_duplicates(extraZ, 'e')
             if remove_overlaps: #True for causal discovery
-                #remove micro-level overlaps from X and Y if appear in Z -- TODO breaking change!
+                #remove input-level overlaps from X and Y if appear in Z -- TODO breaking change!
                 X = remove_overlaps(X, Z)
                 Y = remove_overlaps(Y, Z)
             else: #for causal effect estimation
-                #remove micro-level overlaps...
+                #remove input-level overlaps...
                 #...from adjustment set if appears in user conditions or X (X is prescribed, and Z may be prescribed)
                 extraZ = remove_overlaps(extraZ, X+Z)
                 #...from user conditions if appears in X
@@ -1055,12 +1100,12 @@ class DataFrame():
         if verbosity > 2:
             self.print_array_info(array, X, Y, Z, self.missing_flag, mask_type, type_array, extraZ)
 
-        # Return the array and xyz and optionally (X, Y, Z) and/or macro node information
-        if return_macro_nodes and return_cleaned_xyz:
-            return array, xyz, (X, Y, Z), macro_nodes, node_dict, type_array
+        # Return the array and xyz and optionally (X, Y, Z) and/or vector node information
+        if return_node_info and return_cleaned_xyz:
+            return array, xyz, (X, Y, Z), vector_nodes, node_dict, type_array
         
-        if return_macro_nodes:
-            return array, xyz, macro_nodes, node_dict, type_array
+        if return_node_info:
+            return array, xyz, vector_nodes, node_dict, type_array
         
         if return_cleaned_xyz:
             return array, xyz, (X, Y, Z), type_array
