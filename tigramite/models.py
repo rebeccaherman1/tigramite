@@ -1,6 +1,8 @@
 
 """Tigramite causal inference for time series."""
 #TODO check all instances of construct_array and make sure the duplicates and vectorized logic is consistent.
+#there are more methods that would need the same logic from fit and predict. I might want to turn that transformation 
+#logic into a function, but only if we end up deciding that logic should really stay here.
 
 # Author: Jakob Runge <jakob@jakob-runge.com>
 #
