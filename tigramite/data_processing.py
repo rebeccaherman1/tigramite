@@ -52,6 +52,9 @@ def _get_num_variables(A, efficient_representation=False):
         return A.shape[0]
     else:
         return A.shape[1]
+    
+def _select_samples(A, I=None, efficient_representation=False):
+    return _select_variables(A, I, efficient_representation = not efficient_representation)
 
 class DataFrame():
     """Data object containing single or multiple time series arrays and optional 
@@ -1112,6 +1115,7 @@ class DataFrame():
 
         return array, xyz, type_array
 
+    #TODO Y currently unused!
     def _check_nodes(self, Y, XYZ, N, dim):
         """
         Checks that:
