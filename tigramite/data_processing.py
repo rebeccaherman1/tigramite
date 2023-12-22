@@ -24,6 +24,11 @@ index_codes = {'x' : 0,
                'z' : 2,
                'e' : 3}
 
+def get_var(varlag):
+    return varlag[0]
+def get_lag(varlag):
+    return varlag[1]
+
 """The following functions are for manipuating data extracted from DataFrame.
 Data is stored in the usual way, with shape (time, N variables). This is 
 consistent with the orientation expected by external processors such as sklearn.
@@ -32,7 +37,7 @@ computational efficiency. Efficient_representation=True should be used with
 output of construct_array.
 """
 
-def _select_variables(A, I=None, efficient_representation=False):
+def _select_variables(A, I=None, efficient_representation=False, lags=None):
     """Select data variables of array A using indices I. 
     When efficient_representation=False, each column contains a different variable, 
     as is standard for data storage. This is used for tigramite dataframe data 
@@ -40,11 +45,28 @@ def _select_variables(A, I=None, efficient_representation=False):
     each row contains a different variable. Efficient should be set to True when using 
     the output of construct_array.
     """ 
+    if not efficient_representation:
+        A = A.T
+    #Now A is in the efficient representation, (n variables, n samples)
     if I is not None:
-        if efficient_representation:
-            A = A[I,:]
-        else:
-            A = A[:,I]
+        A = A[I,:]
+    if lags is not None:
+        lags = np.array(lags)
+        if np.any(lags > 1):
+            raise ValueError("lags must be non-positive")
+        num_vars = _get_num_variables(A, efficient_representation=True)
+        if len(lags) != num_vars:
+            raise ValueError("lags has incompatible length")
+        A_old = deepcopy(A)
+        new_sample_length = _get_num_samples(A, efficient_representation=True)+min(lags)
+        A = np.empty((num_vars, new_sample_length))
+        start = lags - np.min(lags)
+        end   = new_sample_length+lags
+        for i, row in enumerate(A_old):
+            A[i,:] = row[start[i]:end[i]]
+    if not efficient_representation:
+        A = A.T
+    #now A is back in its original representation
     return A
 
 def _get_num_variables(A, efficient_representation=False):
@@ -55,6 +77,19 @@ def _get_num_variables(A, efficient_representation=False):
     
 def _select_samples(A, I=None, efficient_representation=False):
     return _select_variables(A, I, efficient_representation = not efficient_representation)
+
+def _get_num_samples(A, efficient_representation=False):
+    return _get_num_variables(A, efficient_representation = not efficient_representation)
+
+#This function selects data variables using indices I and 
+#transposes to be in the correct orientation for sklearn.
+#Inverse action appears below.
+def _to_sklearn(A, I=None):
+    return _select_variables(A, I=I, efficient_representation=True).T
+
+#inverse of the transpose above. 
+def _from_sklearn(A):
+    return A.T
 
 class DataFrame():
     """Data object containing single or multiple time series arrays and optional 
@@ -218,7 +253,7 @@ class DataFrame():
 
     def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, var_names=None,
         data_type=None, datatime=None, analysis_mode ='single', reference_points=None,
-        time_offsets=None, remove_missing_upto_maxlag=False):
+        time_offsets=None, remove_missing_upto_maxlag=False, transform=None):
 
         # Check that a valid analysis mode, specified by the argument
         # 'analysis_mode', has been chosen
@@ -351,6 +386,7 @@ class DataFrame():
             self.T[dataset_key] = _dataset_data_shape[0]
             self.Ndata = _dataset_data_shape[1] # (Number of variables) 
             # N does not vary across the datasets
+            #TODO then why is it in the for loop?! shouldn't it be a check rather than setting it potentially again and again?
 
         self.has_vector_data = (vector_vars is not None)  
         
@@ -404,7 +440,19 @@ class DataFrame():
             self.vector_lengths = np.array([1]*self.Ndata)
         
         self.N = len(self.vector_vars)
-
+        
+        #cache information that might change when a decomposition is applied for a data transform
+        self.original_data = {
+            'values':         deepcopy(self.values),         #dict by dataset
+            'Ndata':          deepcopy(self.Ndata),          #int                    Update at end from vector_lengths
+            'vector_vars':    deepcopy(self.vector_vars),    #dict                   Update at end from vector_lengths
+            'vector_lengths': deepcopy(self.vector_lengths), #np.array of integers
+            'T':              deepcopy(self.T)               #dictionary by dataset
+        }
+        
+        #apply the transform; overwrites the variables above, consulting cached information each time it's called.
+        self.update_transform(transform)
+        
         # Warnings
         if self.analysis_mode == 'single' and self.N > next(iter(self.T.values())):
             warnings.warn("In analysis mode 'single', 'data'.shape = ({}, {});"\
@@ -464,6 +512,44 @@ class DataFrame():
         # If PCMCI.run_bootstrap_of is called, then the
         # bootstrap random draw can be set here
         self.bootstrap = None
+        
+    def update_transform(self, transform=None):
+        self.data_transform = transform
+        
+        if self.data_transform is None:
+            self.fitted_transform = None
+            self.values         = self.original_data['values']
+            self.vector_lengths = self.original_data['vector_lengths']
+            self.vector_vars    = self.original_data['vector_vars']
+            self.Ndata          = self.original_data['Ndata']
+            self.T              = self.original_data['T']
+        else:
+            self.fitted_transform = {}
+            new_values = {k: [] for k in self.original_data['values'].keys()}
+            new_vector_lengths = []
+
+            max_lag = np.max(-1*np.array([varlag[1] for _, vl_list in self.original_data['vector_vars'].items() for varlag in vl_list]))
+
+            for i, (d, original_data) in enumerate(self.original_data['values'].items()):
+                self.T[d] = self.original_data['T'][d]-max_lag 
+                for vec_var, input_varlag_list in self.original_data['vector_vars'].items():
+                    #selects variables, but doesn't deal with the lags
+                    vec_data = _select_variables(original_data, I=[get_var(varlag) for varlag in input_varlag_list], lags=[get_lag(varlag) for varlag in input_varlag_list])
+                    loc_transform = deepcopy(self.data_transform)
+                    p_array = loc_transform.fit_transform(vec_data)
+                    self.fitted_transform[(vec_var, d)] = loc_transform
+                    new_values[d]+=[p_array]
+                    if i==0:
+                        new_vector_lengths+=[_get_num_samples(p_array)]
+                    else:
+                        if _get_num_samples(p_array)!=new_vector_lengths[-1]:
+                            raise ValueError("transform output from different datasets have different number of variables for vector node {}".format(vec_var))
+            for d in self.datasets:
+                new_values[d] = np.concatenate(new_values[d], axis=1)
+            self.values = new_values
+            self.vector_lengths = np.array(new_vector_lengths)
+            self.vector_vars = self.make_vector_node_dict(self.vector_lengths)
+            self.Ndata = np.sum(self.vector_lengths)
         
     def make_vector_node_dict(self, vector_lengths, include_lag=True, key_func=None):
         if key_func is None:

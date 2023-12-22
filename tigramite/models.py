@@ -32,6 +32,7 @@ def _get_vector_node(vector_nodes, i):
 def _get_xyz_from_vector_node(vector_nodes, xyz, i):
     return xyz[_get_vector_node(vector_nodes, i)[0]]
 
+#TODO redundant with data_processing now
 #This function selects data variables using indices I and 
 #transposes to be in the correct orientation for sklearn.
 #Inverse action appears below.
