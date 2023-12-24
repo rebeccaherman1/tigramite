@@ -540,9 +540,9 @@ class DataFrame():
                     self.fitted_transform[(vec_var, d)] = loc_transform
                     new_values[d]+=[p_array]
                     if i==0:
-                        new_vector_lengths+=[_get_num_samples(p_array)]
+                        new_vector_lengths+=[_get_num_variables(p_array)]
                     else:
-                        if _get_num_samples(p_array)!=new_vector_lengths[-1]:
+                        if _get_num_variables(p_array)!=new_vector_lengths[-1]:
                             raise ValueError("transform output from different datasets have different number of variables for vector node {}".format(vec_var))
             for d in self.datasets:
                 new_values[d] = np.concatenate(new_values[d], axis=1)
