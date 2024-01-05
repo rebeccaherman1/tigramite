@@ -71,7 +71,7 @@ class CausalEffects():
         
         self.verbosity = verbosity
         self.N = graph.shape[0]
-        
+
         if S is None:
             S = []
 
@@ -1846,7 +1846,14 @@ class CausalEffects():
             optionally a mask of the same shape and a missing values flag.
         estimator : sklearn model object
             For example, sklearn.linear_model.LinearRegression() for a linear
-            regression model.
+            regression model.sklearn preprocessing or decomposition object, optional (default: None)
+            Used to transform data prior to fitting. For example,
+            sklearn.preprocessing.StandardScaler for simple standardization. 
+            sklearn.pipeline.Pipeline can be used for sequential transformations. 
+            Additional custom sklearn-based transformations can be found in 
+            data_processing.py under ###Custom sklearn-based transformations###. 
+            For vectorized data, tigramite.data_processing.StandardTotalVarianceScaler
+            is recommended. The fitted parameters are stored. 
         adjustment_set : str or list of tuples
             If 'optimal' the Oset is used, if 'minimized_optimal' the minimized Oset,
             and if 'colliders_minimized_optimal', the colliders-minimized Oset.

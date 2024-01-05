@@ -91,6 +91,14 @@ def _to_sklearn(A, I=None):
 def _from_sklearn(A):
     return A.T
 
+#for caching information that might change when a decomposition is applied for a data transform
+transform_attrs = ['values',         #dict by dataset
+                   'Ndata',          #int                    Update at end from vector_lengths
+                   'vector_vars',    #dict                   Update at end from vector_lengths
+                   'vector_lengths', #np.array of integers
+                   'T'               #dictionary by dataset
+                  ]
+
 class DataFrame():
     """Data object containing single or multiple time series arrays and optional 
     mask, as well as variable definitions.
@@ -124,7 +132,7 @@ class DataFrame():
         2*tau_max (more precisely, this depends on the cut_off argument in
         self.construct_array(), see further below). This avoids biases, see
         section on masking in Supplement of Runge et al. SciAdv (2019).
-    vector_vars : dict or integer list #TODO share with Wiebke and Urmi
+    vector_vars : dict or integer list 
         Dictionary of vector variables of the form,
         Eg. {0: [(0, 0), (1, 0)], 1: [(2, 0)], 2: [(3, 0)], 3: [(4, 0)]}
         The keys are the new vectorized variables and respective tuple values
@@ -170,6 +178,14 @@ class DataFrame():
          non-negative integers, at least one of which is 0. The value
          time_offset(m) defines the time offset of dataset m with
          respect to a shared time axis.
+    transform: sklearn preprocessing or decomposition object, optional (default: None)
+        Used to transform data prior to analysis. For example,
+        sklearn.preprocessing.StandardScaler for simple standardization. 
+        sklearn.pipeline.Pipeline can be used for sequential transformations. 
+        Additional custom sklearn-based transformations can be found in 
+        data_processing.py under ###Custom sklearn-based transformations###. 
+        For vectorized data, tigramite.data_processing.StandardTotalVarianceScaler
+        is recommended. The fitted parameters are stored. 
 
     Attributes
     ----------
@@ -184,9 +200,17 @@ class DataFrame():
         If analysis_mode == 'multiple': If self._initialized_from == '3d numpy array', this is
         {m: data[m, :, :] for m in range(data.shape[0])} and for self._initialized_from == 'dict' this
         is data.
-    self.datasets: list
+    self.datasets : list
         List of the keys identifiying the multiple datasets, i.e.,
         list(self.values.keys())
+    self.data_transform : sklearn preprocessing or decomposition object
+        Is transform
+    self.fitted_transform : dictionary
+        #TODO remake using sklearn ColumnTransformer once it's updated
+        Is {var : deepcopy(self.data_transform).fit(var_data) for var in self.vector_vars.keys()}
+        where data is data for that variable from each dataset concatenated together, with appropriate lags
+    self.original_data : dictionary
+        Untransformed data and data attributes
     self.mask : dictionary
         Mask internally mapped to a dictionary representation in the same way as
         data is mapped to self.values
@@ -228,11 +252,15 @@ class DataFrame():
             smaller than 0 and larger than self.largest_time_step-1
         If reference_points is None:
             Is np.array(self.largest_time_step)
+    self.reference_points_is_none: boolean
+        Is self.reference_points is None
     self.time_offsets : dictionary
         If time_offsets is not None:
             Is time_offsets
         If time_offsets is None:
             Is {key: 0 for key in self.values.keys()}
+    self.time_offsets_is_none : boolean
+        Is self.time_offsets is None
     self.M : int
         Number of datasets
     self.N : int
@@ -246,9 +274,14 @@ class DataFrame():
         max_{0 <= m <= M} [ T(m) + time_offset(m)], i.e., the largest (latest)
         time step relative to the shared time axis for which at least one
         observation exists in the dataset.
+    self.smallest_time_step : int TODO Jakob check this
+        min_{0 <= m <= M} [ T(m) + time_offset(m)], i.e., the smalest (earliest)
+        time step relative to the shared time axis for which at least one
+        observation exists in the dataset.
     self.bootstrap : dictionary
         Whether to use bootstrap. Must be a dictionary with keys random_state,
         boot_samples, and boot_blocklength.
+    self.remove_missing_upto_maxlag #TODO Jakob
     """
 
     def __init__(self, data, mask=None, missing_flag=None, vector_vars=None, var_names=None,
@@ -416,7 +449,7 @@ class DataFrame():
                 sl = len(set(v_lst))
                 vl = len(v_lst)
                 if sl<vl:
-                    msg = "Some input variables appear in multiple vector nodes! There are {} duplicates of input variables in the vectorized dataframe"
+                    msg = "Some input variables appear in multiple vector nodes! There are {} overlaps of input variables in the vectorized dataframe"
                     warnings.warn(msg.format(vl-sl))
                 if sl<self.Ndata:
                     msg = "{} input variables are not included in any vector nodes!"
@@ -441,15 +474,8 @@ class DataFrame():
         
         self.N = len(self.vector_vars)
         
-        #cache information that might change when a decomposition is applied for a data transform
-        self.original_data = {
-            'values':         deepcopy(self.values),         #dict by dataset
-            'Ndata':          deepcopy(self.Ndata),          #int                    Update at end from vector_lengths
-            'vector_vars':    deepcopy(self.vector_vars),    #dict                   Update at end from vector_lengths
-            'vector_lengths': deepcopy(self.vector_lengths), #np.array of integers
-            'T':              deepcopy(self.T)               #dictionary by dataset
-        }
-        
+        #cache original data
+        self.original_data = {attr : deepcopy(self.__getattribute__(attr)) for attr in transform_attrs}
         #apply the transform; overwrites the variables above, consulting cached information each time it's called.
         self.update_transform(transform)
         
@@ -518,11 +544,8 @@ class DataFrame():
         
         if self.data_transform is None:
             self.fitted_transform = None
-            self.values         = self.original_data['values']
-            self.vector_lengths = self.original_data['vector_lengths']
-            self.vector_vars    = self.original_data['vector_vars']
-            self.Ndata          = self.original_data['Ndata']
-            self.T              = self.original_data['T']
+            for attr in transform_attrs:
+                self.__setattr__(attr, self.original_data[attr])
         else:
             self.fitted_transform = {}
             new_values = {k: [] for k in self.original_data['values'].keys()}
@@ -530,20 +553,19 @@ class DataFrame():
 
             max_lag = np.max(-1*np.array([varlag[1] for _, vl_list in self.original_data['vector_vars'].items() for varlag in vl_list]))
 
-            for i, (d, original_data) in enumerate(self.original_data['values'].items()):
+            for d in self.original_data['T'].keys():
                 self.T[d] = self.original_data['T'][d]-max_lag 
-                for vec_var, input_varlag_list in self.original_data['vector_vars'].items():
-                    #selects variables, but doesn't deal with the lags
-                    vec_data = _select_variables(original_data, I=[get_var(varlag) for varlag in input_varlag_list], lags=[get_lag(varlag) for varlag in input_varlag_list])
-                    loc_transform = deepcopy(self.data_transform)
-                    p_array = loc_transform.fit_transform(vec_data)
-                    self.fitted_transform[(vec_var, d)] = loc_transform
-                    new_values[d]+=[p_array]
-                    if i==0:
-                        new_vector_lengths+=[_get_num_variables(p_array)]
-                    else:
-                        if _get_num_variables(p_array)!=new_vector_lengths[-1]:
-                            raise ValueError("transform output from different datasets have different number of variables for vector node {}".format(vec_var))
+            #TODO this will look different if ColumnTransformer is modified in a usable way
+            for vec_var, input_varlag_list in self.original_data['vector_vars'].items():
+                vec_data = np.concatenate(
+                    [_select_variables(data_by_set, I=[get_var(varlag) for varlag in input_varlag_list],
+                                       lags=[get_lag(varlag) for varlag in input_varlag_list]) 
+                     for _, data_by_set in self.original_data['values'].items()])
+                self.fitted_transform[vec_var] = deepcopy(self.data_transform).fit(vec_data)
+                for d, data_by_set in self.original_data['values'].items():
+                    p_array = self.fitted_transform[vec_var].transform(vec_data)
+                    new_values[d] += [p_array]
+                new_vector_lengths+=[_get_num_variables(p_array)]
             for d in self.datasets:
                 new_values[d] = np.concatenate(new_values[d], axis=1)
             self.values = new_values
@@ -1809,9 +1831,9 @@ def structural_causal_process(links, T, noises=None,
 ###Custom sklearn-based transformations###
 
 class StandardTotalVarianceScaler(StandardScaler):
-    #As in sklearn's StandardScaler, but total variance is scaled rather than 
-    #feature variance. Total variance of an array A_ij with I samples and J 
-    #features is defined to be sum_ij(a_ij)/I.
+    '''As in sklearn's StandardScaler, but total variance is scaled rather  
+    than feature variance. Total variance of an array A_ij with I samples  
+    and J features is defined to be sum_ij(a_ij)/I.'''
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
     

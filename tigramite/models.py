@@ -196,6 +196,8 @@ class Models():
             raise ValueError("Detected overlaps between Z+conditions, X, and Y.")
         #remove from Z, the adjustment set, if overlaps with conditions
         #this is preferred because the user might want to pass in specific values for conditions
+        #TODO there was something Jakob mentioned to check that I hadn't thought of. Not sure
+        #which file it was supposed to be in. Can't find where I wrote it down, and can't remember.
         self.Z = [node for node in Z if (node not in conditions)]
         self.X = X
         self.Y = Y
