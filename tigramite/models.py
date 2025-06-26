@@ -368,6 +368,7 @@ class Models():
         # Check the model is fitted.
         if self.fit_results is None:
             raise ValueError("Model not yet fitted.")
+        use_conditions = self.conditions is not None and conditions_data is not None
                 
         def _calc_transformed_length(n):
             return sum(self.fit_results['xyz']==self.dataframe.get_index_code(n))
@@ -430,35 +431,32 @@ class Models():
             
         # Transform the data if needed -- data passed in. Return as (n interventions, n variables)
         fitted_data_transform = self.fit_results['fitted_data_transform']
+            
         if transform_interventions_and_prediction and fitted_data_transform is not None:
-            if not self.transform_by_vector:
-                #still in language of tigramite (unsure about original)
-                intervention_data = xyz_transform(fitted_data_transform, 'X', intervention_data)
-                if self.conditions is not None and conditions_data is not None:
-                    conditions_data = xyz_transform(fitted_data_transform, 'S', conditions_data)
-            else:
-                intervention_data = vector_transform(fitted_data_transform, self.X, intervention_data)
-                if self.conditions is not None and conditions_data is not None:
-                    conditions_data = vector_transform(fitted_data_transform, self.conditions, conditions_data)
+            (transform_func, X_in, S_in) = (vector_transform, self.X, self.conditions) if self.transform_by_vector \ 
+                                           else (xyz_transform, 'X', 'S')
+            #still in language of tigramite (unsure about original)
+            intervention_data = transform_func(fitted_data_transform, X_in, intervention_data)
+            if use_conditions:
+                conditions_data = transform_func(fitted_data_transform, S_in, conditions_data)
                 
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
         z_array = _to_sklearn(self.fit_results['observation_array'], 
                               self._get_indices(self.fit_results['xyz'], 'e'))
         x_array = _to_sklearn(self.fit_results['observation_array'],
                               self._get_indices(self.fit_results['xyz'], 'x'))
+        #TODO want to understand connection between s_array and conditions_array!
+        if use_conditions:
+            s_array = _to_sklearn(self.fit_results['observation_array'], 
+                                  self._get_indices(self.fit_results['xyz'], 'z')) 
         #time length
         #TODO I've hardcoded this logic.... 
-        #If the conditions preclude the use of observations, then the resulting array will be 1D and there is no time
+        #If the conditions preclude the use of observations, then the resulting array will be 1D and there is no time?
+        # or it's because I've intervened on so many things that there is no Z? Then what happens to z_array?
         if len(z_array.shape)==1: #NOT TESTED. probably a better way to check it by comparing the inputs.
             Tobs = 1
         else:
             Tobs = _get_num_samples(z_array)
-
-        #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
-        #Use observational data if no chosen values were passed in only.
-        if self.conditions is not None and conditions_data is None:
-            s_array = _to_sklearn(self.fit_results['observation_array'], 
-                                  self._get_indices(self.fit_results['xyz'], 'z')) 
         
         pred_dict = {}
 
@@ -470,18 +468,18 @@ class Models():
             if intervention_type == 'soft':
                 intervention_array += x_array
 
-            if self.conditions is not None and conditions_data is not None:
+            if use_conditions:
                 conditions_array = conditions_data[index].reshape(1, Transformed_lenS) * np.ones((Tobs, Transformed_lenS))  
                 predictor_array = np.hstack((intervention_array, z_array, conditions_array))
-            elif z_array.shape[1]>0:
+            elif z_array.shape[1]>0: #TODO I added this condition... why?
                 predictor_array = np.hstack((intervention_array, z_array))
-            else:
+            else: #TODO I added this fallback; why? I clearly ran into some kind of problem where Z doesn't even exist. 
                 predictor_array = intervention_array
 
             predicted_vals = self.fit_results['model'].predict(
                                                     X=predictor_array, **pred_params)
 
-            if self.conditions is not None and conditions_data is not None:
+            if use_conditions:
 
                 a_conditional_model = deepcopy(self.conditional_model)
                 
