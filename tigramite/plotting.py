@@ -458,6 +458,8 @@ class setup_matrix:
         Fraction of horizontal figure space to allocate left of plot for labels.
     label_space_top : float, optional (default: 0.05)
         Fraction of vertical figure space to allocate top of plot for labels.
+    label_rotation_left : float, optional (default: 0)
+        Rotation of variable labels. Set to 90 for vertical labels on y-axis.
     legend_width : float, optional (default: 0.15)
         Fraction of horizontal figure space to allocate right of plot for
         legend.
@@ -486,6 +488,7 @@ class setup_matrix:
         maximum=1,
         label_space_left=0.1,
         label_space_top=0.05,
+        label_rotation_left=0,
         legend_width=0.15,
         legend_fontsize=10,
         x_base=1.0,
@@ -540,6 +543,7 @@ class setup_matrix:
                         fontsize=label_fontsize,
                         horizontalalignment="left",
                         verticalalignment="center",
+                        rotation=label_rotation_left,
                         transform=trans,
                     )
                 if i == 0:
@@ -869,6 +873,8 @@ class setup_scatter_matrix:
         Fraction of horizontal figure space to allocate left of plot for labels.
     label_space_top : float, optional (default: 0.05)
         Fraction of vertical figure space to allocate top of plot for labels.
+    label_rotation_left : float, optional (default: 0)
+        Rotation of variable labels. Set to 90 for vertical labels on y-axis.
     legend_width : float, optional (default: 0.15)
         Fraction of horizontal figure space to allocate right of plot for
         legend.
@@ -887,6 +893,7 @@ class setup_scatter_matrix:
         figsize=None,
         label_space_left=0.1,
         label_space_top=0.05,
+        label_rotation_left=0,
         legend_width=0.15,
         legend_fontsize=10,
         plot_gridlines=False,
@@ -926,6 +933,7 @@ class setup_scatter_matrix:
                         fontsize=label_fontsize,
                         horizontalalignment="left",
                         verticalalignment="center",
+                        rotation=label_rotation_left,
                         transform=trans,
                     )
                 if i == 0:
@@ -1203,6 +1211,8 @@ class setup_density_matrix:
         Fraction of horizontal figure space to allocate left of plot for labels.
     label_space_top : float, optional (default: 0.05)
         Fraction of vertical figure space to allocate top of plot for labels.
+    label_rotation_left : float, optional (default: 0)
+        Rotation of variable labels. Set to 90 for vertical labels on y-axis.
     legend_width : float, optional (default: 0.15)
         Fraction of horizontal figure space to allocate right of plot for
         legend.
@@ -1221,6 +1231,7 @@ class setup_density_matrix:
         figsize=None,
         label_space_left=0.15,
         label_space_top=0.05,
+        label_rotation_left=0,
         legend_width=0.15,
         legend_fontsize=10,
         tick_label_size=6,
@@ -1260,6 +1271,7 @@ class setup_density_matrix:
                         fontsize=label_fontsize,
                         horizontalalignment="left",
                         verticalalignment="center",
+                        rotation=label_rotation_left,
                         transform=trans,
                     )
                 if i == 0:
@@ -2813,9 +2825,9 @@ def plot_graph(
             else:
                 lags, sig_lags = [], []
             if lag_array is not None:
-                dic["label"] = str([lag_array[l] for l in lags if l in sig_lags])[1:-1].replace(" ", "")
+                dic["label"] = ",".join([str(lag_array[l]) for l in lags if l in sig_lags])  #str([str(lag_array[l]) for l in lags if l in sig_lags])[1:-1].replace(" ", "")
             else:
-                dic["label"] = str([l for l in lags if l in sig_lags])[1:-1].replace(" ", "")
+                dic["label"] = ",".join([str(l) for l in lags if l in sig_lags]) # str([str(l) for l in lags if l in sig_lags])[1:-1].replace(" ", "")
         else:
             # Node color is max of average autodependency
             if no_coloring:
@@ -4486,9 +4498,25 @@ if __name__ == "__main__":
     import tigramite.data_processing as pp
     from tigramite.causal_effects import CausalEffects
 
+    graph = np.zeros((3,3,3), dtype='<U3')
+    graph[0,1,2] = "-->"
+    graph[0,1,1] = "-->"
+    graph[0,1,0] = "-->"; graph[1,0,0] = "<--"
+
+    plot_graph(graph=graph,
+        # val_matrix=val_matrix,
+        # figsize=(5, 5),
+        # var_names = ['Var %s' %i for i in range(len(graph))],
+        # arrow_linewidth=6,
+        # label_space_left = label_space_left,
+        # label_space_top = label_space_top,
+        # # network_lower_bound=network_lower_bound,
+        save_name="test.pdf"
+        )
+
 
     # T = 1000
-    def lin_f(x): return x
+    # def lin_f(x): return x
     # auto_coeff = 0.3
     # coeff = 1.
     # links = {
@@ -4520,14 +4548,14 @@ if __name__ == "__main__":
     #     verbosity=1)
 
 
-    correlations = np.random.rand(3, 3, 5) - 0.5 #pcmci.get_lagged_dependencies(tau_max=20, val_only=True)['val_matrix']
-    lag_func_matrix = plot_lagfuncs(val_matrix=correlations, setup_args={
-                        'label_space_left':0.05, 
-                                    'minimum': 0.0,
-                                    'maximum':.05,
-                                    'x_base':5, 
-                                    'y_base':.5})
-    plt.show()
+    # correlations = np.random.rand(3, 3, 5) - 0.5 #pcmci.get_lagged_dependencies(tau_max=20, val_only=True)['val_matrix']
+    # lag_func_matrix = plot_lagfuncs(val_matrix=correlations, setup_args={
+    #                     'label_space_left':0.05, 
+    #                                 'minimum': 0.0,
+    #                                 'maximum':.05,
+    #                                 'x_base':5, 
+    #                                 'y_base':.5})
+    # plt.show()
 
     
     # N = len(links)

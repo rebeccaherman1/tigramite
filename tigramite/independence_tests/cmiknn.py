@@ -216,7 +216,7 @@ class CMIknn(CondIndTest):
 
         return k_xz, k_yz, k_z
 
-    def get_dependence_measure(self, array, xyz):
+    def get_dependence_measure(self, array, xyz, data_type=None):
         """Returns CMI estimate as described in Frenzel and Pompe PRL (2007).
 
         Parameters
@@ -253,7 +253,8 @@ class CMIknn(CondIndTest):
 
 
     def get_shuffle_significance(self, array, xyz, value,
-                                 return_null_dist=False):
+                                 return_null_dist=False, 
+                                 data_type=None):
         """Returns p-value for nearest-neighbor shuffle significance test.
 
         For non-empty Z, overwrites get_shuffle_significance from the parent
@@ -299,7 +300,7 @@ class CMIknn(CondIndTest):
                       self.shuffle_neighbors, self.sig_samples))
 
             # Get nearest neighbors around each sample point in Z
-            z_array = np.fastCopyAndTranspose(array[z_indices, :])
+            z_array = array[z_indices, :].T.copy()
             tree_xyz = spatial.cKDTree(z_array)
             neighbors = tree_xyz.query(z_array,
                                        k=self.shuffle_neighbors,
@@ -419,7 +420,7 @@ class CMIknn(CondIndTest):
             dim_y = 0
 
 
-        x_array = np.fastCopyAndTranspose(array[x_indices, :])
+        x_array = array[x_indices, :].T.copy()
         tree_xyz = spatial.cKDTree(x_array)
         epsarray = tree_xyz.query(x_array, k=[knn_here+1], p=np.inf,
                                   eps=0., workers=self.workers)[0][:, 0].astype(np.float64)
@@ -568,9 +569,10 @@ if __name__ == '__main__':
     data = np.hstack((x, y, z))
     data[:,0] = 0.5
     print (data.shape)
-    dataframe = DataFrame(data=data)
-    cmi.set_dataframe(dataframe)
-    print(cmi.run_test(X=[(0, 0)], Y=[(1, 0)], alpha_or_thres=0.5  ))
+    # dataframe = DataFrame(data=data)
+    # cmi.set_dataframe(dataframe)
+    # print(cmi.run_test(X=[(0, 0)], Y=[(1, 0)], alpha_or_thres=0.5  ))
     # print(cmi.get_model_selection_criterion(j=1, parents=[], tau_max=0))
     # print(cmi.get_model_selection_criterion(j=1, parents=[(0, 0)], tau_max=0))
     # print(cmi.get_model_selection_criterion(j=1, parents=[(0, 0), (2, 0)], tau_max=0))
+    print(cmi.get_dependence_measure_raw(x=x,y=y,z=z))

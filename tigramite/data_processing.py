@@ -14,7 +14,7 @@ import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
 from scipy import stats
-from numba import jit
+#from numba import jit
 from sklearn.preprocessing import StandardScaler
 
 #TODO pep8 style conventions; ie spaces around comparison etc
@@ -865,6 +865,35 @@ class DataFrame():
                     vectorized_var.append((vector_var, vector_lag + lag))
             return vectorized_var
 
+
+
+        # if extended_summary_graph_lag is not None:
+        #     assert self.vector_vars does not contain lagged microvariables # only space-vectors
+        #     assert tau_max == 1  # or 0 if mode is 'summary_graph' /?
+        #     # Y = vectorize(Y)
+        #     varX, lagX = X[0]  # because X = [(i, -lag)]
+            
+        #     if lagX == 0:
+        #         pass #X = vectorize(X)
+        #     elif: lagX == -1:
+        #         X = [(varX, -lag) for lag in range(1, extended_summary_graph_lag + 1)]
+        #     else:
+        #         raise ValueError("Extended summary graph can only have tau_max = 1")
+
+        #     Znew = []
+        #     for z in Z:
+        #         varZ, lagZ = z   # z = (k, -1) or (k, -2) or (k, 0)
+        #         if: lagZ == 0:
+        #             Znew += z
+        #         elif: lagZ == -1:
+        #             Znew += [(varZ, -lag) for lag in range(1, extended_summary_graph_lag + 1)]   
+        #         elif: lagZ == -2:
+        #             Znew += [(varZ, -lag) for lag in range(2, 2*extended_summary_graph_lag + 1)]   
+        #         else:
+        #             raise ValueError("Extended summary graph can only have tau_max = 1")
+        #     Z = Znew
+
+
         X = vectorize(X) 
         Y = vectorize(Y) 
         Z = vectorize(Z) 
@@ -1547,7 +1576,7 @@ def trafo2normal(data, mask=None, thres=0.001):
 
     return normal_data
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def _get_patterns(array, array_mask, patt, patt_mask, weights, dim, step, fac, N, T):
     v = np.zeros(dim, dtype='float')
 
@@ -1581,7 +1610,7 @@ def _get_patterns(array, array_mask, patt, patt_mask, weights, dim, step, fac, N
     return patt, patt_mask, weights
 
 def ordinal_patt_array(array, array_mask=None, dim=2, step=1,
-                        weights=False, verbosity=0):
+                        weights=False, seed=None, verbosity=0):
     """Returns symbolified array of ordinal patterns.
 
     Each data vector (X_t, ..., X_t+(dim-1)*step) is converted to its rank
@@ -1606,6 +1635,8 @@ def ordinal_patt_array(array, array_mask=None, dim=2, step=1,
         Delay of pattern embedding vector.
     weights : bool, optional (default: False)
         Whether to return array of variances of embedding vectors as weights.
+    seed : int
+        For adding noise to break ties.
     verbosity : int, optional (default: 0)
         Level of verbosity.
 
@@ -1614,7 +1645,9 @@ def ordinal_patt_array(array, array_mask=None, dim=2, step=1,
     patt, patt_mask [, patt_time] : tuple of arrays
         Tuple of converted pattern array and new length
     """
-    from scipy.misc import factorial
+    random_state = np.random.default_rng(seed)
+
+    from scipy.special import factorial
 
     array = array.astype('float64')
 
@@ -1787,15 +1820,18 @@ if __name__ == '__main__':
 
     print(frame.T)
 
-    X=[(0, 0)]
-    Y=[(0, 0)]
-    Z=[(0, -3)]
-    tau_max=5
-    frame.construct_array(X, Y, Z, tau_max,
-                        extraZ=None,
-                        mask=None,
-                        mask_type=None,
-                        return_cleaned_xyz=False,
-                        do_checks=True,
-                        cut_off='2xtau_max',
-                        verbosity=4)
+    # X=[(0, 0)]
+    # Y=[(0, 0)]
+    # Z=[(0, -3)]
+    # tau_max=5
+    # frame.construct_array(X, Y, Z, tau_max,
+    #                     extraZ=None,
+    #                     mask=None,
+    #                     mask_type=None,
+    #                     return_cleaned_xyz=False,
+    #                     do_checks=True,
+    #                     cut_off='2xtau_max',
+    #                     verbosity=4)
+
+    # print(ordinal_patt_array(data, array_mask=None, dim=2, step=1,
+    #                     weights=False, verbosity=0)[0])

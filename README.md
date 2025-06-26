@@ -1,6 +1,6 @@
 # Tigramite – Causal inference for time series datasets
+![logo](docs/_images/tigramite_logo_header.png)
 Version 5.2
-
 (Python Package)
 
 [Github](https://github.com/jakobrunge/tigramite.git)
@@ -38,6 +38,7 @@ Further, Tigramite provides several causal discovery methods that can be used un
 | CMIsymb                       | multivariate discrete/categorical variables (permutation-based test)                                   |
 | RegressionCI                  | mixed datasets with univariate discrete/categorical and (linear) continuous variables                  |
 
+Remark: With the conditional independence test wrapper class PairwiseMultCI you can turn every univariate test into a multivariate test.
 
 ## General Notes
 
@@ -107,7 +108,7 @@ You commit to cite above papers in your reports or publications.
 
 ## License
 
-Copyright (C) 2014-2023 Jakob Runge
+Copyright (C) 2014-2025 Jakob Runge
 
 See license.txt for full text.
 

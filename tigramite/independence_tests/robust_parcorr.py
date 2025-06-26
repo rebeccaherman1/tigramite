@@ -179,7 +179,7 @@ class RobustParCorr(CondIndTest):
         y = array[target_var, :]
 
         if dim_z > 0:
-            z = np.fastCopyAndTranspose(array[2:, :])
+            z = array[2:, :].T.copy()
             beta_hat = np.linalg.lstsq(z, y, rcond=None)[0]
             mean = np.dot(z, beta_hat)
             resid = y - mean
@@ -222,7 +222,8 @@ class RobustParCorr(CondIndTest):
         return val
 
     def get_shuffle_significance(self, array, xyz, value,
-                                 return_null_dist=False):
+                                 return_null_dist=False,
+                                 data_type=None):
         """Returns p-value for shuffle significance test.
 
         Firstly, each marginal is transformed to the standard normal scale.

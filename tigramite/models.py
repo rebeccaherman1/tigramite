@@ -239,6 +239,7 @@ class Models():
         # Transform the data if needed. updates 'array' in place, as well as 'xyz'
         self.fitted_data_transform = None
         if self.data_transform is not None:
+
             self.fitted_data_transform = {}
             
             #original functionality. assumes that transforms work element-wise (does not hold for PCA)
@@ -279,7 +280,7 @@ class Models():
                 #update xyz, should update what is used in the helper function as well.
                 xyz = np.array(xyz_list)
                 vector_nodes = np.array(vector_node_list)
-                                
+
         # Fit the model 
         # Copy and fit the model
         a_model = deepcopy(self.model)
@@ -471,7 +472,7 @@ class Models():
                 predictor_array = intervention_array
 
             predicted_vals = self.fit_results['model'].predict(
-            X=predictor_array, **pred_params)
+                                                    X=predictor_array, **pred_params)
 
             if self.conditions is not None and conditions_data is not None:
 
@@ -1925,10 +1926,13 @@ class Prediction(Models, PCMCI):
             # Force the masking
             cond_ind_test.set_mask_type('y')
             cond_ind_test.verbosity = verbosity
-            PCMCI.__init__(self,
-                           dataframe=self.dataframe,
-                           cond_ind_test=cond_ind_test,
-                           verbosity=verbosity)
+            # PCMCI.__init__(self,
+            #                dataframe=self.dataframe,
+            #                cond_ind_test=cond_ind_test,
+            #                verbosity=verbosity)
+            self.pcmci = PCMCI(dataframe=self.dataframe,
+                               cond_ind_test=cond_ind_test,
+                               verbosity=verbosity)
 
         # Set the member variables
         self.cond_ind_test = cond_ind_test
@@ -1998,7 +2002,8 @@ class Prediction(Models, PCMCI):
         self.selected_variables = range(self.N)
         if selected_targets is not None:
             self.selected_variables = selected_targets
-        predictors = self.run_pc_stable(link_assumptions=link_assumptions,
+        
+        predictors = self.pcmci.run_pc_stable(link_assumptions=link_assumptions,
                                         tau_min=steps_ahead,
                                         tau_max=tau_max,
                                         save_iterations=False,

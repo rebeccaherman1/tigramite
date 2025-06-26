@@ -183,7 +183,7 @@ class ParCorrWLS(ParCorr):
         y = np.copy(arr[target_var, :])
 
         if dim_z > 0:
-            z = np.fastCopyAndTranspose(arr[2:, :])
+            z = arr[2:, :].T.copy()
             beta_hat = np.linalg.lstsq(z, y, rcond=None)[0]
             mean = np.dot(z, beta_hat)
             resid = abs(y - mean)
@@ -223,7 +223,7 @@ class ParCorrWLS(ParCorr):
         y = np.copy(arr[target_var, :])
 
         if dim_z > 0:
-            z = np.fastCopyAndTranspose(arr[2:, :])
+            z = arr[2:, :].T.copy()
             beta_hat = np.linalg.lstsq(z, y, rcond=None)[0]
             mean = np.dot(z, beta_hat)
             resid = abs(y - mean)
@@ -368,7 +368,7 @@ class ParCorrWLS(ParCorr):
         weights = np.diag(np.reciprocal(stds))
 
         if dim_z > 0:
-            z = np.fastCopyAndTranspose(array[2:, :])
+            z = array[2:, :].T.copy()
             # include weights in z and y
             zw = np.dot(weights, z)
             yw = np.dot(y, weights)
@@ -388,13 +388,14 @@ class ParCorrWLS(ParCorr):
             return resid, mean
         return resid
 
-    def get_dependence_measure(self, array, xyz):
+    def get_dependence_measure(self, array, xyz, data_type=None):
         if self.robustify:
             array = RobustParCorr.trafo2normal(self, array)
         return ParCorr.get_dependence_measure(self, array, xyz)
 
     def get_shuffle_significance(self, array, xyz, value,
-                                 return_null_dist=False):
+                                 return_null_dist=False,
+                                 data_type=None):
         if self.robustify:
             array = RobustParCorr.trafo2normal(self, array)
         return ParCorr.get_shuffle_significance(self, array, xyz, value,

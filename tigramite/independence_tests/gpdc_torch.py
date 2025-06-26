@@ -230,7 +230,7 @@ class GaussProcRegTorch():
             #                      "possibly constant array!")
 
         target_series = array[target_var, :]
-        z = np.fastCopyAndTranspose(array[2:])
+        z = array[2:].T.copy()
         if np.ndim(z) == 1:
             z = z.reshape(-1, 1)
 
@@ -677,7 +677,7 @@ class GPDCtorch(CondIndTest):
         """
         return self.gauss_pr._get_model_selection_criterion(j, parents, tau_max)
 
-    def get_dependence_measure(self, array, xyz):
+    def get_dependence_measure(self, array, xyz, data_type=None):
         """Return GPDC measure.
 
         Estimated as the distance correlation of the residuals of a GP
@@ -729,7 +729,8 @@ class GPDCtorch(CondIndTest):
         return val
 
     def get_shuffle_significance(self, array, xyz, value,
-                                 return_null_dist=False):
+                                 return_null_dist=False,
+                                 data_type=None):
         """Returns p-value for shuffle significance test.
 
         For residual-based test statistics only the residuals are shuffled.

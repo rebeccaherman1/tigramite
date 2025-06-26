@@ -12,7 +12,6 @@ import math
 import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
-from numba import jit
 import itertools
 
 def _generate_noise(covar_matrix, time=1000, use_inverse=False):
@@ -739,7 +738,7 @@ def structural_causal_process(links, T, noises=None,
         elif isinstance(intervention_type, str):
             intervention_type = {j:intervention_type for j in intervention}
         for j in intervention.keys():
-            if len(intervention[j]) != T:
+            if len(np.atleast_1d(intervention[j])) != T:
                 raise ValueError("intervention array for j=%s must be of length T = %d" %(j, T))
             if j not in intervention_type.keys():        
                 raise ValueError("intervention_type dictionary must contain entry for %s" %(j))
