@@ -52,6 +52,9 @@ def _get_num_variables(A, efficient_representation=False):
         return A.shape[0]
     else:
         return A.shape[1]
+
+def _get_num_samples(A, efficient_representation=False):
+    return _get_num_variables(A, efficient_representation = not efficient_representation)
     
 def _select_samples(A, I=None, efficient_representation=False):
     return _select_variables(A, I, efficient_representation = not efficient_representation)

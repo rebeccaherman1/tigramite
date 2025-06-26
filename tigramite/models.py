@@ -316,6 +316,7 @@ class Models():
         fit_results['fitted_data_transform'] = self.fitted_data_transform
         fit_results['vector_nodes'] = vector_nodes
         fit_results['node_dict'] = node_dict
+        fit_results['regressor_indices'] = predictor_indices
 
         # Cache and return the fit results
         self.fit_results = fit_results
@@ -439,8 +440,14 @@ class Models():
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
         z_array = _to_sklearn(self.fit_results['observation_array'], 
                               self._get_indices(self.fit_results['xyz'], 'e'))
-        #time length?
-        Tobs = z_array.shape[0]
+        #time length
+        #TODO I've hardcoded this logic.... 
+        #If the conditions preclude the use of observations, then the resulting array will be 1D and there is no time
+        if len(z_array.shape)==1: #NOT TESTED. probably a better way to check it by comparing the inputs.
+            Tobs = 1
+        else:
+            Tobs = _get_num_samples(z_array)
+
 
         #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
         #Use observational data if no chosen values were passed in only.
@@ -458,8 +465,10 @@ class Models():
             if self.conditions is not None and conditions_data is not None:
                 conditions_array = conditions_data[index].reshape(1, Transformed_lenS) * np.ones((Tobs, Transformed_lenS))  
                 predictor_array = np.hstack((intervention_array, z_array, conditions_array))
-            else:
+            elif z_array.shape[1]>0:
                 predictor_array = np.hstack((intervention_array, z_array))
+            else:
+                predictor_array = intervention_array
 
             predicted_vals = self.fit_results['model'].predict(
             X=predictor_array, **pred_params)
@@ -498,6 +507,7 @@ class Models():
 
             aggregated_pred = aggregated_pred.squeeze()
 
+            #TODO this will NOT always return something in the dimensions mentioned before!
             if index == 0:
                 predicted_array = np.zeros((intervention_T, ) + aggregated_pred.shape, 
                                         dtype=aggregated_pred.dtype)
