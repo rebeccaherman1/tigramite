@@ -331,6 +331,7 @@ class Models():
                 transform_interventions_and_prediction=False,
                 return_further_pred_results=False,
                 aggregation_func=np.mean,
+                intervention_type='hard',
                 ):
         r"""Predict effect of intervention with fitted model.
 
@@ -339,9 +340,9 @@ class Models():
         Parameters
         ----------
         intervention_data : numpy array
-            Numpy array of shape (n interventions, len(X)) that contains the do(X) values.
+            Numpy array of shape (n_interventions, len(X)) that contains the do(X) values.
         conditions_data : data object, optional
-            Numpy array of shape (n interventions, len(S)) that contains the S=s values.
+            Numpy array of shape (n_interventions, len(S)) that contains the S=s values.
         pred_params : dict, optional
             Optional parameters passed on to sklearn prediction function (model and
             conditional_model).
@@ -352,7 +353,10 @@ class Models():
             the entire results can be returned.
         aggregation_func : callable
             Callable applied to output of 'predict'. Default is 'np.mean'.
-
+        intervention_type : {'hard', 'soft'}
+            Specify whether intervention is 'hard' (set value) or 'soft' 
+            (add value to observed data).
+  
         Returns
         -------
         Results from prediction.
@@ -364,9 +368,7 @@ class Models():
         # Check the model is fitted.
         if self.fit_results is None:
             raise ValueError("Model not yet fitted.")
-        
-        intervention_T, _ = intervention_data.shape
-        
+                
         def _calc_transformed_length(n):
             return sum(self.fit_results['xyz']==self.dataframe.get_index_code(n))
         def _check_error(a, b, a_name, b_name, dataframe_type):
@@ -378,6 +380,7 @@ class Models():
                 
         Transformed_lenX = _calc_transformed_length('x')
         Transformed_lenS = _calc_transformed_length('z')
+        n_interventions, _ = intervention_data.shape
 
         if transform_interventions_and_prediction:
             _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
@@ -441,6 +444,8 @@ class Models():
         # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
         z_array = _to_sklearn(self.fit_results['observation_array'], 
                               self._get_indices(self.fit_results['xyz'], 'e'))
+        x_array = _to_sklearn(self.fit_results['observation_array'],
+                              self._get_indices(self.fit_results['xyz'], 'x'))
         #time length
         #TODO I've hardcoded this logic.... 
         #If the conditions preclude the use of observations, then the resulting array will be 1D and there is no time
@@ -448,7 +453,6 @@ class Models():
             Tobs = 1
         else:
             Tobs = _get_num_samples(z_array)
-
 
         #CHANGED! I removed the "not" regarding conditions_data; I think the logic was wrong.
         #Use observational data if no chosen values were passed in only.
@@ -463,6 +467,9 @@ class Models():
         for index, dox_vals in enumerate(intervention_data):
             # Construct XZS-array. rehape makes size a lenth-2 tuple rather than length-1.
             intervention_array = dox_vals.reshape(1, Transformed_lenX) * np.ones((Tobs, Transformed_lenX))
+            if intervention_type == 'soft':
+                intervention_array += x_array
+
             if self.conditions is not None and conditions_data is not None:
                 conditions_array = conditions_data[index].reshape(1, Transformed_lenS) * np.ones((Tobs, Transformed_lenS))  
                 predictor_array = np.hstack((intervention_array, z_array, conditions_array))
@@ -510,7 +517,7 @@ class Models():
 
             #TODO this will NOT always return something in the dimensions mentioned before!
             if index == 0:
-                predicted_array = np.zeros((intervention_T, ) + aggregated_pred.shape, 
+                predicted_array = np.zeros((n_interventions, ) + aggregated_pred.shape, 
                                         dtype=aggregated_pred.dtype)
 
             predicted_array[index] = aggregated_pred
