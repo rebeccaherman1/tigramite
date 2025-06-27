@@ -433,7 +433,7 @@ class Models():
         fitted_data_transform = self.fit_results['fitted_data_transform']
             
         if transform_interventions_and_prediction and fitted_data_transform is not None:
-            (transform_func, X_in, S_in) = (vector_transform, self.X, self.conditions) if self.transform_by_vector \ 
+            (transform_func, X_in, S_in) = (vector_transform, self.X, self.conditions) if self.transform_by_vector \
                                            else (xyz_transform, 'X', 'S')
             #still in language of tigramite (unsure about original)
             intervention_data = transform_func(fitted_data_transform, X_in, intervention_data)

@@ -848,7 +848,7 @@ class CausalEffects(Graphs):
         if intervention_data.shape[1] != lenX:
             raise ValueError("intervention_data.shape[1] must be len(X).")
 
-        if intervention_type is not in {'hard', 'soft'}:
+        if intervention_type not in {'hard', 'soft'}:
             raise ValueError("intervention_type must be 'hard' or 'soft'.")
 
         if conditions_data is not None and lenS > 0:
