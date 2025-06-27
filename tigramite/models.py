@@ -369,20 +369,28 @@ class Models():
         if self.fit_results is None:
             raise ValueError("Model not yet fitted.")
         use_conditions = self.conditions is not None and conditions_data is not None
-                
+
+        # Check the transform is fitted
+        if transform_interventions_and_prediction:
+            fitted_data_transform = self.fit_results['fitted_data_transform']
+            if fitted_data_transform is None:
+                warnings.warn("No data transform was used when fitting the model. " + 
+                              "transform_interventions_and_prediction ignored.")
+                transform_interventions_and_prediction = False
+
+        # Check inputs are consistent with fitted model
         def _calc_transformed_length(n):
             return sum(self.fit_results['xyz']==self.dataframe.get_index_code(n))
+        Transformed_lenX = _calc_transformed_length('x')
+        Transformed_lenS = _calc_transformed_length('z')
+        Transformed_lenY = _calc_transformed_length('y')
+        
         def _check_error(a, b, a_name, b_name, dataframe_type):
             if a != b:
                 raise ValueError(
                     "{} ({}) must equal the vectorized length of {} in the {} dataframe ({}).".format(
                         a_name, a, b_name, dataframe_type, b)
                 )
-                
-        Transformed_lenX = _calc_transformed_length('x')
-        Transformed_lenS = _calc_transformed_length('z')
-        n_interventions, _ = intervention_data.shape
-
         if transform_interventions_and_prediction:
             _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
         else:
@@ -402,80 +410,92 @@ class Models():
                 for key in list(pred_params):
                     print("%s = %s" % (key, pred_params[key]))
 
-        # Default value for pred_params
-        if pred_params is None:
-            pred_params = {}
-
-        def get_index_dict(W):
-            key_func = lambda x: W[x]
-            return self.dataframe.make_vector_node_dict(self.get_vectorized_lengths(W), include_lag=False, key_func = key_func)
-        
-        #entire function already in language of sklearn
-        def list_transform(T, data, I=None, inverse=False):
+        # Transform intervention / conditions data if needed -- data passed in. Return as (n interventions, n variables)
+        #TODO this might get more complicated if we allow interventions over time as well -- maybe this block will need to be moved into the for loop.
+        def list_transform(T, data, I=None, inverse=False): #entire function already in language of sklearn
             data=_select_variables(data, I=I)
             if inverse:
                 data = T.inverse_transform(X=data)
             else: 
                 data = T.transform(X=data)
             return data
-        
+        def get_index_dict(W):
+            key_func = lambda x: W[x]
+            return self.dataframe.make_vector_node_dict(self.get_vectorized_lengths(W), include_lag=False, key_func = key_func)
         def vector_transform(fitted_data_transform, node_list, data, inverse=False):
             lengths = get_index_dict(node_list)
             data_list = []
             for varlag in node_list:
                 data_list += [list_transform(fitted_data_transform[varlag], data, I=lengths[varlag], inverse=inverse)]
             return np.concatenate(data_list, axis=1)
-        
         def xyz_transform(fitted_data_transform, XYZid, data, inverse=False):
             return list_transform(fitted_data_transform[XYZid], data, inverse=inverse)
-            
-        # Transform the data if needed -- data passed in. Return as (n interventions, n variables)
-        fitted_data_transform = self.fit_results['fitted_data_transform']
-            
-        if transform_interventions_and_prediction and fitted_data_transform is not None:
-            (transform_func, X_in, S_in) = (vector_transform, self.X, self.conditions) if self.transform_by_vector \
-                                           else (xyz_transform, 'X', 'S')
+        if transform_interventions_and_prediction:
+            (transform_func, X_in, S_in, Y_in) = (vector_transform, self.X, self.conditions, self.Y) if self.transform_by_vector \
+                                           else (xyz_transform, 'X', 'S', 'Y')
             #still in language of tigramite (unsure about original)
             intervention_data = transform_func(fitted_data_transform, X_in, intervention_data)
             if use_conditions:
                 conditions_data = transform_func(fitted_data_transform, S_in, conditions_data)
-                
-        # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
-        z_array = _to_sklearn(self.fit_results['observation_array'], 
-                              self._get_indices(self.fit_results['xyz'], 'e'))
-        x_array = _to_sklearn(self.fit_results['observation_array'],
-                              self._get_indices(self.fit_results['xyz'], 'x'))
-        #TODO want to understand connection between s_array and conditions_array!
+
+        indentity_func = lambda x : x
+
+        #extract additional observational data if needed
+        if len(self.Z) > 0:
+            # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
+            z_array = _to_sklearn(self.fit_results['observation_array'], 
+                                  self._get_indices(self.fit_results['xyz'], 'e'))
+            stack_z_if_nontrivial = lambda intervention_array : np.hstack((intervention_array, z_array))
+            Tobs = _get_num_samples(z_array)
+        else:
+            stack_z_if_nontrivial = indentity_func
+            Tobs = 1
+        
+        if intervention_type == 'soft':
+            x_array = _to_sklearn(self.fit_results['observation_array'],
+                                  self._get_indices(self.fit_results['xyz'], 'x'))
+            add_x_if_soft = lambda intervention_array : intervention_array + x_array
+            Tobs = max(Tobs, _get_num_samples(x_array))
+        else:
+            add_x_if_soft = indentity_func
+
+        def reshape_for_obs(arr, len_vars, num_samples=Tobs):
+            #rehape makes size a lenth-2 tuple rather than length-1.
+            return arr.reshape(1, len_vars) * np.ones((Tobs, len_vars))
+
+        #TODO want to understand connection between s_array and conditions_data!
         if use_conditions:
             s_array = _to_sklearn(self.fit_results['observation_array'], 
-                                  self._get_indices(self.fit_results['xyz'], 'z')) 
-        #time length
-        #TODO I've hardcoded this logic.... 
-        #If the conditions preclude the use of observations, then the resulting array will be 1D and there is no time?
-        # or it's because I've intervened on so many things that there is no Z? Then what happens to z_array?
-        if len(z_array.shape)==1: #NOT TESTED. probably a better way to check it by comparing the inputs.
-            Tobs = 1
+                                  self._get_indices(self.fit_results['xyz'], 'z'))
+            stack_conditions_if_used = lambda intervention_array, index : np.hstack(
+                (intervention_array, reshape_for_obs(conditions_data[index], Transformed_lenS))
+            )
+            Tcond = _get_num_samples(s_array)
         else:
-            Tobs = _get_num_samples(z_array)
-        
+            stack_conditions_if_used = lambda intervention_array, _ : intervention_array
+            Tcond = 1
+        def reshape_pred_if_needed(arr):
+            if Tobs == 1:
+                return reshape_for_obs(arr, Transformed_lenY, num_samples=Tcond)
+            else:
+                return arr
+
+        #process inputs
+        n_interventions, _ = intervention_data.shape
+        # Default value for pred_params
+        if pred_params is None:
+            pred_params = {}
         pred_dict = {}
 
         # Now iterate through interventions (and potentially S)
         # enumerate will iterate through ROWs -- ok when (n interventions, n variables)
         for index, dox_vals in enumerate(intervention_data):
-            # Construct XZS-array. rehape makes size a lenth-2 tuple rather than length-1.
-            intervention_array = dox_vals.reshape(1, Transformed_lenX) * np.ones((Tobs, Transformed_lenX))
-            if intervention_type == 'soft':
-                intervention_array += x_array
-
-            if use_conditions:
-                conditions_array = conditions_data[index].reshape(1, Transformed_lenS) * np.ones((Tobs, Transformed_lenS))  
-                predictor_array = np.hstack((intervention_array, z_array, conditions_array))
-            elif z_array.shape[1]>0: #TODO I added this condition... why?
-                predictor_array = np.hstack((intervention_array, z_array))
-            else: #TODO I added this fallback; why? I clearly ran into some kind of problem where Z doesn't even exist. 
-                predictor_array = intervention_array
-
+            # Construct XZS-array. 
+            predictor_array = stack_conditions_if_used(
+                stack_z_if_nontrivial(
+                    add_x_if_soft(
+                        reshape_for_obs(dox_vals, Transformed_lenX))),
+                index)
             predicted_vals = self.fit_results['model'].predict(
                                                     X=predictor_array, **pred_params)
 
@@ -487,20 +507,18 @@ class Models():
                     predicted_vals_here = predicted_vals[0]
                 else:
                     predicted_vals_here = predicted_vals
-                
-                a_conditional_model.fit(X=s_array, y=predicted_vals_here)
+
+                # TODO haven't yet applied aggregation func, so predicted_vals will only have the right x dimension if Tobs != 1
+                # have proposed solution but not tested.
+                a_conditional_model.fit(X=s_array, y=reshape_pred_if_needed(predicted_vals_here))
                 self.fit_results['conditional_model'] = a_conditional_model
 
                 predicted_vals = a_conditional_model.predict(
                     X=conditions_array, **pred_params)
 
-            if transform_interventions_and_prediction and fitted_data_transform is not None:
-                if not self.transform_by_vector:
-                    predicted_vals = xyz_transform(fitted_data_transform, 'Y', 
-                                                   predicted_vals, inverse=True).squeeze()
-                    #fitted_data_transform['Y'].inverse_transform(X=predicted_vals).squeeze()
-                else:
-                    predicted_vals = vector_transform(fitted_data_transform, self.Y, predicted_vals, inverse=True)
+            if transform_interventions_and_prediction:
+                predicted_vals = transform_func(fitted_data_transform, Y_in, 
+                                                predicted_vals, inverse=True).squeeze() #TODO didn't use squeeze when transforming by vector?
 
             #(n interventions, n variables), whether transform_interventions_and_prediction is True or False
             pred_dict[index] = predicted_vals

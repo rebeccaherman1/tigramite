@@ -845,7 +845,12 @@ class CausalEffects(Graphs):
         lenX = get_vectorized_length(self.listX)
         lenS = get_vectorized_length(self.listS)
 
-        if intervention_data.shape[1] != lenX:
+        if len(intervention_data.shape) < 2:
+            if intervention_data.shape[0] != lenX:
+                raise ValueError("intervention_data must have len(X).")
+            else:
+                intervention_data = intervention_data.reshape((1,)+intervention_data.shape)
+        elif intervention_data.shape[1] != lenX:
             raise ValueError("intervention_data.shape[1] must be len(X).")
 
         if intervention_type not in {'hard', 'soft'}:
