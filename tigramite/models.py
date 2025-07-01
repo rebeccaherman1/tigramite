@@ -15,7 +15,7 @@ import numpy as np
 import sklearn
 import sklearn.linear_model
 import networkx
-from tigramite.data_processing import DataFrame, _select_variables, _get_num_variables
+from tigramite.data_processing import DataFrame, _select_variables, _get_num_variables, _get_num_samples
 from tigramite.pcmci import PCMCI
 from collections import defaultdict, OrderedDict
 
@@ -370,27 +370,27 @@ class Models():
             raise ValueError("Model not yet fitted.")
         use_conditions = self.conditions is not None and conditions_data is not None
 
-        # Check the transform is fitted
         if transform_interventions_and_prediction:
+            # Check the transform is fitted
             fitted_data_transform = self.fit_results['fitted_data_transform']
             if fitted_data_transform is None:
                 warnings.warn("No data transform was used when fitting the model. " + 
                               "transform_interventions_and_prediction ignored.")
                 transform_interventions_and_prediction = False
 
-        # Check inputs are consistent with fitted model
+        # Check specs of fitted model
         def _calc_transformed_length(n):
             return sum(self.fit_results['xyz']==self.dataframe.get_index_code(n))
         Transformed_lenX = _calc_transformed_length('x')
         Transformed_lenS = _calc_transformed_length('z')
         Transformed_lenY = _calc_transformed_length('y')
-        
+
+        # Check inputs are consistent with fitted model
         def _check_error(a, b, a_name, b_name, dataframe_type):
             if a != b:
                 raise ValueError(
                     "{} ({}) must equal the vectorized length of {} in the {} dataframe ({}).".format(
-                        a_name, a, b_name, dataframe_type, b)
-                )
+                        a_name, a, b_name, dataframe_type, b))
         if transform_interventions_and_prediction:
             _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
         else:
@@ -438,9 +438,10 @@ class Models():
             if use_conditions:
                 conditions_data = transform_func(fitted_data_transform, S_in, conditions_data)
 
+        #extract additional observational data if needed
         indentity_func = lambda x : x
 
-        #extract additional observational data if needed
+        #   backdoor conditions
         if len(self.Z) > 0:
             # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
             z_array = _to_sklearn(self.fit_results['observation_array'], 
@@ -450,7 +451,8 @@ class Models():
         else:
             stack_z_if_nontrivial = indentity_func
             Tobs = 1
-        
+
+        #   soft interventions
         if intervention_type == 'soft':
             x_array = _to_sklearn(self.fit_results['observation_array'],
                                   self._get_indices(self.fit_results['xyz'], 'x'))
@@ -459,10 +461,12 @@ class Models():
         else:
             add_x_if_soft = indentity_func
 
+        #   making copies of intervention values to match observational distribution
         def reshape_for_obs(arr, len_vars, num_samples=Tobs):
             #rehape makes size a lenth-2 tuple rather than length-1.
             return arr.reshape(1, len_vars) * np.ones((Tobs, len_vars))
 
+        #   user-specified conditions
         #TODO want to understand connection between s_array and conditions_data!
         if use_conditions:
             s_array = _to_sklearn(self.fit_results['observation_array'], 
@@ -496,6 +500,7 @@ class Models():
                     add_x_if_soft(
                         reshape_for_obs(dox_vals, Transformed_lenX))),
                 index)
+            print("examining predictor array {}: {}".format(index, predictor_array))
             predicted_vals = self.fit_results['model'].predict(
                                                     X=predictor_array, **pred_params)
 
@@ -508,13 +513,12 @@ class Models():
                 else:
                     predicted_vals_here = predicted_vals
 
-                # TODO haven't yet applied aggregation func, so predicted_vals will only have the right x dimension if Tobs != 1
-                # have proposed solution but not tested.
+                # haven't yet applied aggregation func, so predicted_vals will only have the right x dimension if Tobs != 1
+                # TODO have proposed solution but not tested.
                 a_conditional_model.fit(X=s_array, y=reshape_pred_if_needed(predicted_vals_here))
                 self.fit_results['conditional_model'] = a_conditional_model
 
-                predicted_vals = a_conditional_model.predict(
-                    X=conditions_array, **pred_params)
+                predicted_vals = a_conditional_model.predict(X=conditions_data[index], **pred_params) #will return only one value.
 
             if transform_interventions_and_prediction:
                 predicted_vals = transform_func(fitted_data_transform, Y_in, 

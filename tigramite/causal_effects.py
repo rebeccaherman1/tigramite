@@ -155,12 +155,6 @@ class CausalEffects(Graphs):
             if abs(varlag[1]) > self.tau_max:
                 raise ValueError("X, Y, S must have time lags inside graph.")
 
-        if len(self.X.intersection(self.Y)) > 0:
-            raise ValueError("Overlap between X and Y.")
-
-        if len(self.S.intersection(self.Y.union(self.X))) > 0:
-            raise ValueError("Conditions S overlap with X or Y.")
-
         # # TODO: need to prove that this is sufficient for non-identifiability!
         # if len(self.X.intersection(self._get_descendants(self.M))) > 0:
         #     raise ValueError("Not identifiable: Overlap between X and des(M)")
