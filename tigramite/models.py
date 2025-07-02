@@ -500,7 +500,6 @@ class Models():
                     add_x_if_soft(
                         reshape_for_obs(dox_vals, Transformed_lenX))),
                 index)
-            print("examining predictor array {}: {}".format(index, predictor_array))
             predicted_vals = self.fit_results['model'].predict(
                                                     X=predictor_array, **pred_params)
 
