@@ -15,14 +15,9 @@ import numpy as np
 import sklearn
 import sklearn.linear_model
 import networkx
-from tigramite.data_processing import DataFrame, _select_variables, _get_num_variables, _get_num_samples
+from tigramite.data_processing import DataFrame, _select_variables, _get_num_variables, _get_num_samples, _where, _to_sklearn, _from_sklearn, get_index_code, _get_indices
 from tigramite.pcmci import PCMCI
 from collections import defaultdict, OrderedDict
-
-#returns a list of indices where A (an integer array with one non-trivial axis) equals B (an integer)
-def _where(A, B):
-    #The [0] turns the 2d outputed array from np.where into a 1d array for transformation to a list.
-    return list(np.where(A==B)[0])
 
 #uses the vector_nodes array to determine indices of data variables that correspond to the ith vector-level (var, lag). 
 def _get_vector_node(vector_nodes, i):
@@ -31,16 +26,6 @@ def _get_vector_node(vector_nodes, i):
 #returns index_code corresponding to the ith vector-level node, using the vector_nodes array and the xyz array
 def _get_xyz_from_vector_node(vector_nodes, xyz, i):
     return xyz[_get_vector_node(vector_nodes, i)[0]]
-
-#This function selects data variables using indices I and 
-#transposes to be in the correct orientation for sklearn.
-#Inverse action appears below.
-def _to_sklearn(A, I=None):
-    return _select_variables(A, I=I, efficient_representation=True).T
-
-#inverse of the transpose above. 
-def _from_sklearn(A):
-    return A.T
 
 class Models():
     """Base class for time series models.
@@ -121,10 +106,6 @@ class Models():
     def get_vectorized_lengths(self, W):
         return [self.dataframe.vector_lengths[w[0]] for w in W]   
     
-    #uses the xyz array to determine indices of data variables that correspond to node-type n
-    def _get_indices(self, xyz, xyzid):
-        return _where(xyz, self.dataframe.get_index_code(xyzid))
-    
     #selects variables from `array` using indices I and fits sklearn object to the selected variables,
     #Returns tuple with fitted transform and transformed data. Maintains language of computational efficiency
     def _fit_transform(self, array, I=None):
@@ -135,7 +116,7 @@ class Models():
 
     #transforms data divided by XYZ. Returns only the fitted transform.
     def _fit_xyz_transform(self, array, xyz, xyzid):
-        loc_indices = self._get_indices(xyz, xyzid)
+        loc_indices = _get_indices(xyz, xyzid)
         return self._fit_transform(array, I=loc_indices)[0]
 
     #transforms data separated by vector node and lag. Returns fitted transform and transformed data.
@@ -288,11 +269,11 @@ class Models():
         #requires new, transformed xyz matrix
         predictor_indices = []
         for i in ['x', 'e', 'z']:
-            predictor_indices += self._get_indices(xyz, i)
+            predictor_indices += _get_indices(xyz, i)
         
         #the following arrays in the language of sklearn
         predictor_array = _to_sklearn(array, predictor_indices)
-        target_array = _to_sklearn(array, self._get_indices(xyz, 'y'))
+        target_array = _to_sklearn(array, _get_indices(xyz, 'y'))
 
         if predictor_array.size == 0:
             # Just fit default (eg, mean)
@@ -380,7 +361,7 @@ class Models():
 
         # Check specs of fitted model
         def _calc_transformed_length(n):
-            return sum(self.fit_results['xyz']==self.dataframe.get_index_code(n))
+            return sum(self.fit_results['xyz']==get_index_code(n))
         Transformed_lenX = _calc_transformed_length('x')
         Transformed_lenS = _calc_transformed_length('z')
         Transformed_lenY = _calc_transformed_length('y')
@@ -445,7 +426,7 @@ class Models():
         if len(self.Z) > 0:
             # Extract observational Z from stored array. Already transformed. still in language tigramite, must change to sklearn.
             z_array = _to_sklearn(self.fit_results['observation_array'], 
-                                  self._get_indices(self.fit_results['xyz'], 'e'))
+                                  _get_indices(self.fit_results['xyz'], 'e'))
             stack_z_if_nontrivial = lambda intervention_array : np.hstack((intervention_array, z_array))
             Tobs = _get_num_samples(z_array)
         else:
@@ -455,7 +436,7 @@ class Models():
         #   soft interventions
         if intervention_type == 'soft':
             x_array = _to_sklearn(self.fit_results['observation_array'],
-                                  self._get_indices(self.fit_results['xyz'], 'x'))
+                                  _get_indices(self.fit_results['xyz'], 'x'))
             add_x_if_soft = lambda intervention_array : intervention_array + x_array
             Tobs = max(Tobs, _get_num_samples(x_array))
         else:
@@ -470,7 +451,7 @@ class Models():
         #TODO want to understand connection between s_array and conditions_data!
         if use_conditions:
             s_array = _to_sklearn(self.fit_results['observation_array'], 
-                                  self._get_indices(self.fit_results['xyz'], 'z'))
+                                  _get_indices(self.fit_results['xyz'], 'z'))
             stack_conditions_if_used = lambda intervention_array, index : np.hstack(
                 (intervention_array, reshape_for_obs(conditions_data[index], Transformed_lenS))
             )

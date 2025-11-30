@@ -19,10 +19,11 @@ from sklearn.preprocessing import StandardScaler
 
 #TODO pep8 style conventions; ie spaces around comparison etc
 
-index_codes = {'x' : 0,
-               'y' : 1,
-               'z' : 2,
-               'e' : 3}
+#For a query P(Y|do(X),Z):
+index_codes = {'x' : 0, #intervention nodes
+               'y' : 1, #target nodes
+               'z' : 2, #condition nodes from query. would prefer to call this S
+               'e' : 3} #backdoor conditioning set.                   and this Z
 
 """The following functions are for manipuating data extracted from DataFrame.
 Data is stored in the usual way, with shape (time, N variables). This is 
@@ -58,6 +59,27 @@ def _get_num_samples(A, efficient_representation=False):
     
 def _select_samples(A, I=None, efficient_representation=False):
     return _select_variables(A, I, efficient_representation = not efficient_representation)
+
+def _where(A, B):
+    '''returns a list of indices where A (an integer array with one non-trivial axis) equals B (an integer)'''
+    #The [0] turns the 2d outputed array from np.where into a 1d array for transformation to a list.
+    return list(np.where(A==B)[0])
+
+def _to_sklearn(A, I=None):
+    '''This function selects data variables using indices I and transposes to be in the 
+    correct orientation for sklearn. Inverse action appears below.'''
+    return _select_variables(A, I=I, efficient_representation=True).T
+ 
+def _from_sklearn(A):
+    '''inverse of the transpose above.'''
+    return A.T
+
+def get_index_code(n):
+    return index_codes[n]    
+
+def _get_indices(xyz, xyzid):
+    '''uses the xyz array to determine indices of data variables that correspond to node-type n'''
+    return _where(xyz, get_index_code(xyzid))
 
 class DataFrame():
     """Data object containing single or multiple time series arrays and optional 
@@ -476,9 +498,6 @@ class DataFrame():
             return {k: [(e,0) for e in d[k]] for k in d.keys()}
         else:
             return d
-
-    def get_index_code(self, n):
-        return index_codes[n]
 
     def _check_mask(self, mask, check_data_type=False):
         """Checks that the mask is:
@@ -971,7 +990,7 @@ class DataFrame():
                 "'max_lag_or_tau_max', '2xtau_max_future'}")
             
         #TODO make this an accessible function for use in models.py?
-        xyz = np.array([self.get_index_code(name)
+        xyz = np.array([get_index_code(name)
                         for var, name in zip([X, Y, Z, extraZ], ['x', 'y', 'z', 'e'])
                         for _ in var])
 
@@ -1295,7 +1314,7 @@ def get_block_length(array, xyz, mode):
     # Initiailize the indices
     indices = range(dim)
     if mode == 'significance':
-        indices = np.where(xyz == index_codes['x'])[0]
+        indices = _get_indices(xyz, 'x')
 
     # Maximum lag for autocov estimation
     max_lag = int(0.1*T)
