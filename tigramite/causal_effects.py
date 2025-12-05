@@ -102,7 +102,7 @@ class CausalEffects(Graphs):
             self.tau_max = 0
 
         elif graph_type in ['tsg_dag', 'tsg_admg']:
-            # tau_max is implicitely derived from
+            # tau_max is implicitly derived from
             # the dimensions 
             self.tau_max = graph.shape[2] - 1
 
@@ -129,6 +129,7 @@ class CausalEffects(Graphs):
                         hidden_variables=self.hidden_variables,
                         verbosity=verbosity)
 
+        #sanity check for values and lags to make sure they're in range
         self._check_XYS()
 
         self.ancX = self._get_ancestors(X)
@@ -150,10 +151,6 @@ class CausalEffects(Graphs):
         self.M = M
 
         self.listM = list(self.M)
-
-        for varlag in self.X.union(self.Y).union(self.S):
-            if abs(varlag[1]) > self.tau_max:
-                raise ValueError("X, Y, S must have time lags inside graph.")
 
         # # TODO: need to prove that this is sufficient for non-identifiability!
         # if len(self.X.intersection(self._get_descendants(self.M))) > 0:
@@ -839,19 +836,15 @@ class CausalEffects(Graphs):
         lenX = get_vectorized_length(self.listX)
         lenS = get_vectorized_length(self.listS)
 
-        if len(intervention_data.shape) < 2:
-            if intervention_data.shape[0] != lenX:
-                raise ValueError("intervention_data must have len(X).")
-            else:
-                intervention_data = intervention_data.reshape((1,)+intervention_data.shape)
-        elif intervention_data.shape[1] != lenX:
+        if intervention_data.shape[1] != lenX:
             raise ValueError("intervention_data.shape[1] must be len(X).")
 
         if intervention_type not in {'hard', 'soft'}:
             raise ValueError("intervention_type must be 'hard' or 'soft'.")
 
         if conditions_data is not None and lenS > 0:
-            if conditions_data.shape[1] != lenS:
+            
+            if (conditions_data.shape[1] != lenS):
                 raise ValueError("conditions_data.shape[1] must be len(S).")
             if conditions_data.shape[0] != intervention_data.shape[0]:
                 raise ValueError("conditions_data.shape[0] must match intervention_data.shape[0].")

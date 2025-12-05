@@ -376,7 +376,7 @@ class Models():
             _check_error(intervention_data.shape[1], self.lenX, 'intervention_data.shape[1]', 'X', 'original')
         else:
             _check_error(intervention_data.shape[1], Transformed_lenX, "intervention_data.shape[1]", 'X', 'transformed')
-        if conditions_data is not None:
+        if use_conditions:
             if transform_interventions_and_prediction:
                 _check_error(conditions_data.shape[1], self.lenS, "conditions_data.shape[1]", 'S', "original")
             else:
@@ -435,6 +435,7 @@ class Models():
 
         #   soft interventions
         if intervention_type == 'soft':
+            print("Soft!\n")
             x_array = _to_sklearn(self.fit_results['observation_array'],
                                   _get_indices(self.fit_results['xyz'], 'x'))
             add_x_if_soft = lambda intervention_array : intervention_array + x_array
@@ -498,7 +499,7 @@ class Models():
                 a_conditional_model.fit(X=s_array, y=reshape_pred_if_needed(predicted_vals_here))
                 self.fit_results['conditional_model'] = a_conditional_model
 
-                predicted_vals = a_conditional_model.predict(X=conditions_data[index], **pred_params) #will return only one value.
+                predicted_vals = a_conditional_model.predict(X=conditions_data[index].reshape(1, -1), **pred_params) #will return only one value. #the reshape is necessary to turn it into a 2d array. picked the option for only one sample.
 
             if transform_interventions_and_prediction:
                 predicted_vals = transform_func(fitted_data_transform, Y_in, 
